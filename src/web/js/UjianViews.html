@@ -1,0 +1,153 @@
+<script>
+/* ===== Tampilan ujian (dipakai admin & guru), soal, peserta, hasil ===== */
+function ujianListView(box, role) {
+  const isGuru = role === 'guru';
+  const reload = () => ujianListView(box, role);
+  loading(box);
+  Promise.all([api('ujian.list'), isGuru ? api('guru.penugasan.list') : Promise.resolve([])]).then(([list, penugasan]) => {
+    const cols = [
+      { label: 'Ujian', render: (u) => h('div', null, h('strong', null, u.judul), h('div', { class: 'muted' }, `${u.mapelNama} · ${u.jenisUjianNama}`)) },
+      !isGuru && { label: 'Guru', key: 'guruNama' },
+      { label: 'Waktu', render: (u) => `${u.durasiMenit} mnt` },
+      { label: 'Jadwal', render: (u) => (u.mulai || u.selesai) ? `${fmtDateTime(u.mulai)} – ${fmtDateTime(u.selesai)}` : 'Kapan saja' },
+      { label: 'Soal aktif', render: (u) => `${u.jumlahSoalAktif}/${u.jumlahSoal}` },
+      { label: 'Peserta', key: 'jumlahPeserta' },
+      { label: 'Token', render: (u) => h('span', { class: 'mono' }, u.token) },
+      { label: 'Status', render: (u) => isGuru ? badge(u.aktif, 'Aktif', 'Draft/nonaktif') : actionBtn(u.aktif ? 'Nonaktifkan' : 'Aktifkan', async () => {
+        await api('admin.ujian.setAktif', { id: u.id, aktif: !u.aktif }); toast(u.aktif ? 'Ujian dinonaktifkan.' : 'Ujian diaktifkan.'); reload();
+      }, u.aktif ? 'danger' : 'primary') },
+      { label: 'Aksi', render: (u) => h('div', { class: 'row' },
+        actionBtn('Soal', async () => soalView(box, u, role, reload)),
+        isGuru && actionBtn('Peserta', async () => pesertaView(box, u, reload)),
+        actionBtn('Hasil', async () => hasilView(box, u, reload)),
+        actionBtn('Token baru', async () => { const r = await api('ujian.generateToken', { id: u.id }); toast('Token baru: ' + r.token); reload(); }),
+        isGuru && actionBtn('Ubah', async () => ujianForm(u, penugasan, reload)),
+        isGuru && actionBtn('Hapus', async () => { if (await confirmBox(`Hapus ujian "${u.judul}" beserta soalnya?`)) { await api('guru.ujian.remove', { id: u.id }); toast('Ujian dihapus.'); reload(); } }, 'danger')) },
+    ].filter(Boolean);
+    box.replaceChildren(
+      h('div', { class: 'row', style: 'margin-bottom:1rem' }, isGuru && h('button', { class: 'primary', onclick: () => ujianForm(null, penugasan, reload) }, '+ Buat ujian'),
+        h('span', { class: 'muted' }, isGuru ? 'Ujian baru berstatus draft; admin yang mengaktifkannya.' : 'Aktifkan ujian agar muncul di aplikasi siswa.')),
+      h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada ujian.')));
+  }).catch(fail);
+}
+
+function ujianForm(u, penugasan, done) {
+  const aktifP = penugasan.filter((p) => p.aktif || (u && p.id === u.penugasanId));
+  if (!u && !aktifP.length) return toast('Belum ada mapel aktif. Aktifkan di menu "Mapel Saya" atau minta admin menambah penugasan.', 'error');
+  const fields = [
+    !u && { name: 'penugasanId', label: 'Mapel & jenis ujian', type: 'select', required: true,
+      options: aktifP.map((p) => ({ value: p.id, label: `${p.mapelNama} — ${p.jenisUjianNama} (default ${p.durasiMenit} mnt)` })) },
+    { name: 'judul', label: 'Judul ujian', required: true },
+    { name: 'deskripsi', label: 'Deskripsi / petunjuk', type: 'textarea' },
+    { name: 'durasiMenit', label: 'Waktu ujian (menit)', type: 'number', min: 1, max: 600, required: true },
+    { name: 'mulai', label: 'Dibuka pada (opsional)', type: 'datetime-local' },
+    { name: 'selesai', label: 'Ditutup pada (opsional)', type: 'datetime-local' },
+    { name: 'acakSoal', label: 'Acak urutan soal per siswa', type: 'checkbox', default: true },
+    { name: 'acakOpsi', label: 'Acak urutan opsi jawaban per siswa', type: 'checkbox', default: true },
+    { name: 'tampilNilai', label: 'Tampilkan nilai ke siswa setelah selesai', type: 'checkbox', default: false },
+  ].filter(Boolean);
+  const init = u ? Object.assign({}, u, { mulai: toLocalInput(u.mulai), selesai: toLocalInput(u.selesai) })
+    : { durasiMenit: aktifP[0].durasiMenit };
+  const modal = formModal({
+    title: u ? 'Ubah ujian' : 'Buat ujian', fields, initial: init,
+    onSubmit: async (v) => { await api('guru.ujian.save', Object.assign({ id: u && u.id }, v)); toast('Ujian disimpan.'); done(); },
+  });
+  const sel = document.querySelector('select[name=penugasanId]');
+  if (sel) sel.addEventListener('change', () => { const p = aktifP.find((x) => x.id === sel.value); if (p) document.querySelector('input[name=durasiMenit]').value = p.durasiMenit; });
+  return modal;
+}
+
+function backBar(title, back) {
+  return h('div', { class: 'row', style: 'margin-bottom:1rem' }, h('button', { onclick: back }, '← Kembali'), h('h3', { style: 'margin:0' }, title));
+}
+
+function soalView(box, ujian, role, back) {
+  const isGuru = role === 'guru';
+  const reload = () => soalView(box, ujian, role, back);
+  loading(box);
+  api('soal.list', { ujianId: ujian.id }).then((list) => {
+    const cols = [
+      { label: 'No', render: (q) => String(list.indexOf(q) + 1) },
+      { label: 'Tipe', render: (q) => TIPE_LABEL[q.tipe] || q.tipe },
+      { label: 'Soal', wrap: true, render: (q) => h('div', null, h('div', null, q.teks), soalPreview(q)) },
+      { label: 'Bobot', key: 'bobot' },
+      { label: 'Aktif', render: (q) => actionBtn(q.aktif ? 'Aktif ✓' : 'Nonaktif', async () => { await api('soal.setAktif', { id: q.id, aktif: !q.aktif }); reload(); }, q.aktif ? '' : 'danger') },
+      isGuru && { label: 'Aksi', render: (q) => h('div', { class: 'row' },
+        actionBtn('Ubah', async () => soalEditor(ujian.id, q, reload)),
+        actionBtn('Hapus', async () => { if (await confirmBox('Hapus soal ini?')) { await api('guru.soal.remove', { id: q.id }); reload(); } }, 'danger')) },
+    ].filter(Boolean);
+    box.replaceChildren(backBar(`Soal — ${ujian.judul}`, back),
+      isGuru && h('div', { style: 'margin-bottom:1rem' }, h('button', { class: 'primary', onclick: () => soalEditor(ujian.id, null, reload) }, '+ Tambah soal')),
+      h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada soal.')));
+  }).catch(fail);
+}
+
+function pesertaView(box, ujian, back) {
+  loading(box);
+  api('guru.peserta.get', { ujianId: ujian.id }).then((list) => {
+    const chosen = {}; list.forEach((s) => { chosen[s.nis] = s.terpilih; });
+    const kelasList = Array.from(new Set(list.map((s) => s.kelas))).sort();
+    const kelasSel = h('select', null, h('option', { value: '' }, 'Semua kelas'), kelasList.map((k) => h('option', { value: k }, k)));
+    const search = h('input', { placeholder: 'Cari nama / NIS…' });
+    const counter = h('strong');
+    const holder = h('div');
+    const visible = () => list.filter((s) => (!kelasSel.value || s.kelas === kelasSel.value) &&
+      (!search.value || (s.nama + s.nis).toLowerCase().indexOf(search.value.toLowerCase()) >= 0));
+    const refresh = () => {
+      counter.textContent = `${Object.keys(chosen).filter((k) => chosen[k]).length} peserta terpilih`;
+      holder.replaceChildren(dataTable([
+        { label: 'Ikut', render: (s) => h('input', { type: 'checkbox', checked: chosen[s.nis], onchange: (e) => { chosen[s.nis] = e.target.checked; counter.textContent = `${Object.keys(chosen).filter((k) => chosen[k]).length} peserta terpilih`; } }) },
+        { label: 'NIS', key: 'nis' }, { label: 'Nama', key: 'nama' }, { label: 'Kelas', key: 'kelas' }, { label: 'Jenjang', key: 'jenjang' },
+      ], visible(), 'Tidak ada siswa.'));
+    };
+    kelasSel.addEventListener('change', refresh); search.addEventListener('input', refresh);
+    const mark = (val) => { visible().forEach((s) => { chosen[s.nis] = val; }); refresh(); };
+    box.replaceChildren(backBar(`Peserta — ${ujian.judul}`, back),
+      h('div', { class: 'card' },
+        h('div', { class: 'row', style: 'margin-bottom:.75rem' }, h('div', { style: 'width:200px' }, kelasSel), h('div', { style: 'width:240px' }, search),
+          h('button', { onclick: () => mark(true) }, 'Pilih yang tampil'), h('button', { onclick: () => mark(false) }, 'Kosongkan yang tampil'),
+          h('span', { class: 'right' }, counter),
+          h('button', { class: 'primary', onclick: (e) => busy(e.currentTarget, async () => {
+            const r = await api('guru.peserta.set', { ujianId: ujian.id, nisList: Object.keys(chosen).filter((k) => chosen[k]) });
+            toast(`Tersimpan: ${r.total} peserta (+${r.ditambah} / −${r.dihapus}).`);
+          }) }, 'Simpan peserta')),
+        holder));
+    refresh();
+  }).catch(fail);
+}
+
+function hasilView(box, ujian, back) {
+  loading(box);
+  api('hasil.list', { ujianId: ujian.id }).then((list) => {
+    const reload = () => hasilView(box, ujian, back);
+    const cols = [
+      { label: 'NIS', key: 'nis' }, { label: 'Nama', key: 'nama' }, { label: 'Kelas', key: 'kelas' },
+      { label: 'Status', render: (r) => h('span', { class: 'badge ' + (r.status === 'selesai' ? 'ok' : 'warn') }, r.status) },
+      { label: 'Nilai', render: (r) => r.nilai === null ? '-' : h('strong', null, String(r.nilai)) },
+      { label: 'Koreksi', render: (r) => r.perluKoreksi ? h('span', { class: 'badge warn' }, 'Essay belum dinilai') : '' },
+      { label: 'Aksi', render: (r) => actionBtn('Detail', async () => hasilDetail(r.sesiId, reload)) },
+    ];
+    box.replaceChildren(backBar(`Hasil — ${ujian.judul}`, back), h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada siswa yang mengerjakan.')));
+  }).catch(fail);
+}
+
+function hasilDetail(sesiId, onChange) {
+  return api('hasil.detail', { sesiId }).then((d) => {
+    const fmt = (v) => (v === null || v === undefined ? '(kosong)' : typeof v === 'object' ? JSON.stringify(v) : String(v));
+    const items = d.soal.map((q) => {
+      const scoreBox = q.manual ? h('input', { type: 'number', min: 0, max: q.bobot, step: 0.5, value: q.skor === null ? '' : q.skor, style: 'width:90px' }) : null;
+      return h('div', { class: 'card' },
+        h('div', null, h('strong', null, `${q.nomor}. `), q.teks, h('span', { class: 'muted' }, `  [${TIPE_LABEL[q.tipe]} · bobot ${q.bobot}]`)),
+        h('div', { style: 'margin:.4rem 0' }, h('span', { class: 'muted' }, 'Jawaban siswa: '), fmt(q.jawaban)),
+        q.manual ? h('div', { class: 'row' }, h('span', null, 'Skor (0–' + q.bobot + '):'), scoreBox,
+          actionBtn('Simpan skor', async () => {
+            if (scoreBox.value === '') throw { message: 'Isi skor.' };
+            const r = await api('hasil.nilaiEssay', { sesiId, soalId: q.soalId, skor: Number(scoreBox.value) });
+            toast(`Tersimpan. Nilai akhir: ${r.nilai}`); onChange();
+          }))
+          : h('div', null, h('span', { class: 'muted' }, 'Skor otomatis: '), String(q.skor)));
+    });
+    openModal({ title: `Detail jawaban — nilai ${d.sesi.nilai}`, wide: true, content: h('div', null, items) });
+  }).catch(fail);
+}
+</script>

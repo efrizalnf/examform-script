@@ -1,0 +1,172 @@
+<script>
+/* ===== Core: DOM helper, API client, UI primitives ===== */
+const App = { token: null, user: null, nav: null };
+
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  let value;
+  Object.entries(attrs || {}).forEach(([k, v]) => {
+    if (v === null || v === undefined || v === false) return;
+    if (k === 'class') e.className = v;
+    else if (k === 'value') value = v;
+    else if (k === 'checked' || k === 'disabled' || k === 'selected') e[k] = !!v;
+    else if (k.slice(0, 2) === 'on' && typeof v === 'function') e.addEventListener(k.slice(2), v);
+    else e.setAttribute(k, v === true ? '' : v);
+  });
+  kids.flat(Infinity).forEach((c) => {
+    if (c === null || c === undefined || c === false) return;
+    e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  });
+  if (value !== undefined) e.value = value;
+  return e;
+}
+
+function api(action, data) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler((text) => {
+        let r; try { r = JSON.parse(text); } catch (e) { return reject({ code: 'BAD_RESPONSE', message: 'Respons server tidak valid.' }); }
+        if (r.success) return resolve(r.data);
+        if (r.error && r.error.code === 'UNAUTHORIZED' && App.token) { logout(true); }
+        reject(r.error);
+      })
+      .withFailureHandler((e) => reject({ code: 'NETWORK', message: (e && e.message) || 'Gagal menghubungi server.' }))
+      .apiRequest(JSON.stringify({ action, data: data || {}, token: App.token }));
+  });
+}
+
+function toast(msg, kind) {
+  const t = h('div', { class: 'toast' + (kind === 'error' ? ' error' : '') }, msg);
+  $('#toasts').append(t);
+  setTimeout(() => t.remove(), kind === 'error' ? 6000 : 3000);
+}
+function $(sel, root) { return (root || document).querySelector(sel); }
+const fail = (e) => toast((e && e.message) || 'Terjadi kesalahan.', 'error');
+
+function loading(container) { container.replaceChildren(h('p', { class: 'muted' }, 'Memuat…')); }
+
+/** Jalankan aksi async pada tombol: nonaktifkan selama proses, tampilkan error sebagai toast. */
+async function busy(btn, fn) {
+  if (btn) btn.disabled = true;
+  try { return await fn(); } catch (e) { fail(e); } finally { if (btn) btn.disabled = false; }
+}
+
+/** Modal. buttons: [{label, kind, onClick}] — onClick boleh async; return false = tetap terbuka. */
+function openModal({ title, content, buttons, wide }) {
+  const err = h('p', { class: 'err' });
+  const overlay = h('div', { class: 'overlay' });
+  const close = () => overlay.remove();
+  const bar = h('div', { class: 'actions' }, (buttons || [{ label: 'Tutup' }]).map((b) =>
+    h('button', {
+      class: b.kind || '',
+      onclick: async (ev) => {
+        const btn = ev.currentTarget; err.textContent = '';
+        btn.disabled = true;
+        try { const r = b.onClick ? await b.onClick({ close }) : undefined; if (r !== false) close(); }
+        catch (e) { err.textContent = (e && e.message) || 'Terjadi kesalahan.'; }
+        finally { btn.disabled = false; }
+      },
+    }, b.label)));
+  overlay.append(h('div', { class: 'modal' + (wide ? ' wide' : ''), role: 'dialog' }, h('h3', null, title), content, err, bar));
+  document.body.append(overlay);
+  const first = overlay.querySelector('input,select,textarea'); if (first) first.focus();
+  return { close };
+}
+
+function confirmBox(message, okLabel) {
+  return new Promise((resolve) => {
+    openModal({
+      title: 'Konfirmasi', content: h('p', null, message),
+      buttons: [{ label: 'Batal', onClick: () => resolve(false) }, { label: okLabel || 'Ya, lanjutkan', kind: 'primary', onClick: () => resolve(true) }],
+    });
+  });
+}
+
+/* ----- form builder ----- */
+function fieldEl(f, val) {
+  const common = { name: f.name, required: f.required };
+  let input;
+  if (f.type === 'select') {
+    input = h('select', common, (f.options || []).map((o) => h('option', { value: o.value, selected: String(o.value) === String(val) }, o.label)));
+  } else if (f.type === 'textarea') input = h('textarea', Object.assign({ placeholder: f.placeholder }, common), val || '');
+  else if (f.type === 'checkbox') {
+    input = h('input', { type: 'checkbox', name: f.name, checked: val === undefined ? f.default : val });
+    return h('label', { class: 'check' }, input, f.label);
+  } else {
+    input = h('input', Object.assign({ type: f.type || 'text', value: val === undefined || val === null ? '' : val, placeholder: f.placeholder, min: f.min, max: f.max, step: f.step, autocomplete: 'off' }, common));
+  }
+  return h('label', { class: 'field' }, h('span', null, f.label + (f.required ? ' *' : '')), input, f.hint ? h('small', null, f.hint) : null);
+}
+
+function readForm(form, fields) {
+  const out = {};
+  fields.forEach((f) => {
+    const el = form.elements[f.name]; if (!el) return;
+    if (f.type === 'checkbox') out[f.name] = el.checked;
+    else if (f.type === 'number') out[f.name] = el.value === '' ? undefined : Number(el.value);
+    else if (f.type === 'datetime-local') out[f.name] = el.value ? new Date(el.value).toISOString() : '';
+    else out[f.name] = el.value.trim();
+  });
+  return out;
+}
+
+function formModal({ title, fields, initial, submitLabel, onSubmit, wide }) {
+  const init = initial || {};
+  const form = h('form', { onsubmit: (e) => e.preventDefault() }, fields.map((f) => fieldEl(f, init[f.name])));
+  return openModal({
+    title, content: form, wide,
+    buttons: [{ label: 'Batal' }, {
+      label: submitLabel || 'Simpan', kind: 'primary',
+      onClick: async () => {
+        if (!form.reportValidity()) return false;
+        await onSubmit(readForm(form, fields));
+      },
+    }],
+  });
+}
+
+/* ----- table ----- */
+function dataTable(cols, rows, emptyText) {
+  if (!rows.length) return h('p', { class: 'muted' }, emptyText || 'Belum ada data.');
+  return h('div', { class: 'table-wrap' }, h('table', null,
+    h('thead', null, h('tr', null, cols.map((c) => h('th', null, c.label)))),
+    h('tbody', null, rows.map((r) => h('tr', null, cols.map((c) =>
+      h('td', { class: c.wrap ? 'wrap' : '' }, c.render ? c.render(r) : (r[c.key] === undefined || r[c.key] === null ? '' : String(r[c.key])))))))));
+}
+const badge = (on, yes, no) => h('span', { class: 'badge ' + (on ? 'ok' : 'off') }, on ? (yes || 'Aktif') : (no || 'Nonaktif'));
+const actionBtn = (label, fn, kind) => h('button', { class: 'small ' + (kind || ''), onclick: (e) => busy(e.currentTarget, fn) }, label);
+
+/* ----- format ----- */
+function fmtDateTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso); if (isNaN(d)) return '-';
+  return d.toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function toLocalInput(iso) {
+  if (!iso) return '';
+  const d = new Date(iso); if (isNaN(d)) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** Tampilkan daftar kredensial (NIS/username + password) dengan opsi salin & cetak. */
+function showCredentials(title, rows, columns) {
+  const cols = columns || [{ key: 'nis', label: 'NIS' }, { key: 'nama', label: 'Nama' }, { key: 'kelas', label: 'Kelas' }, { key: 'password', label: 'Password' }];
+  const csv = [cols.map((c) => c.label).join('\t')].concat(rows.map((r) => cols.map((c) => r[c.key] || '').join('\t'))).join('\n');
+  openModal({
+    title, wide: true,
+    content: h('div', null,
+      h('p', { class: 'muted' }, 'Simpan/cetak sekarang — password hanya ditampilkan sekali dan tidak dapat dilihat lagi.'),
+      dataTable(cols.map((c) => Object.assign({}, c, c.key === 'password' ? { render: (r) => h('span', { class: 'mono' }, r.password) } : {})), rows)),
+    buttons: [
+      { label: 'Cetak', onClick: () => { window.print(); return false; } },
+      { label: 'Salin (Tab/Excel)', onClick: () => {
+        const ta = h('textarea', { style: 'position:fixed;opacity:0' }, csv); document.body.append(ta); ta.select();
+        try { document.execCommand('copy'); toast('Disalin ke clipboard.'); } catch (e) { toast('Gagal menyalin.', 'error'); }
+        ta.remove(); return false;
+      } },
+      { label: 'Tutup', kind: 'primary' },
+    ],
+  });
+}
+</script>

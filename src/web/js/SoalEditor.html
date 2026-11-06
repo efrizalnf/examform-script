@@ -1,0 +1,124 @@
+<script>
+/* ===== Editor soal: form dinamis per tipe, konversi ke/dari struktur API ===== */
+const TIPE_LABEL = { pg: 'Pilihan ganda', multi: 'Multi opsi (pilih >1)', isian: 'Isian singkat', essay: 'Essay', jodoh: 'Menjodohkan' };
+const KEYS = 'ABCDEFGHIJ';
+
+function soalEditor(ujianId, soal, onSaved) {
+  const s = soal || {};
+  const state = { tipe: s.tipe || 'pg' };
+  const tipeSel = h('select', null, Object.keys(TIPE_LABEL).map((k) => h('option', { value: k, selected: k === state.tipe }, TIPE_LABEL[k])));
+  const teks = h('textarea', { required: true }, s.teks || '');
+  const bobot = h('input', { type: 'number', min: 0, step: 0.5, value: s.bobot === undefined ? 1 : s.bobot });
+  const body = h('div');
+
+  // --- builders per tipe: masing-masing mengembalikan {el, read()} ---
+  const builders = {
+    pg: () => optionBuilder(s.tipe === 'pg' ? s : null, false),
+    multi: () => optionBuilder(s.tipe === 'multi' ? s : null, true),
+    isian: () => {
+      const ta = h('textarea', null, s.tipe === 'isian' ? (s.kunci || []).join('\n') : '');
+      return { el: h('label', { class: 'field' }, h('span', null, 'Jawaban benar'), ta, h('small', null, 'Satu per baris. Semua alternatif diterima; huruf besar/kecil & spasi ganda diabaikan.')),
+        read: () => ({ kunci: ta.value.split('\n').map((x) => x.trim()).filter(Boolean) }) };
+    },
+    essay: () => {
+      const ta = h('textarea', null, s.tipe === 'essay' ? (s.kunci || '') : '');
+      return { el: h('label', { class: 'field' }, h('span', null, 'Rubrik / pedoman penilaian (opsional)'), ta, h('small', null, 'Hanya terlihat oleh guru. Essay dinilai manual.')),
+        read: () => ({ kunci: ta.value.trim() }) };
+    },
+    jodoh: () => pairBuilder(s.tipe === 'jodoh' ? s : null),
+  };
+
+  function optionBuilder(existing, multi) {
+    const rows = [];
+    const list = h('div');
+    const addRow = (teksVal, correct) => {
+      const text = h('input', { type: 'text', value: teksVal || '', placeholder: 'Teks opsi' });
+      const mark = h('input', { type: multi ? 'checkbox' : 'radio', name: 'benar', checked: !!correct, title: 'Jawaban benar' });
+      const row = h('div', { class: 'opt-row' }, h('strong', { class: 'mono' }, ''), mark, text,
+        h('button', { type: 'button', class: 'small danger', onclick: () => { const i = rows.indexOf(item); rows.splice(i, 1); row.remove(); relabel(); } }, '×'));
+      const item = { row, text, mark }; rows.push(item); list.append(row); relabel();
+    };
+    const relabel = () => rows.forEach((r, i) => { r.row.firstChild.textContent = KEYS.charAt(i) + '.'; });
+    if (existing) existing.opsi.forEach((o) => addRow(o.teks, multi ? existing.kunci.indexOf(o.key) >= 0 : existing.kunci === o.key));
+    else for (let i = 0; i < 4; i++) addRow('', false);
+    return {
+      el: h('div', null, h('p', { class: 'muted' }, multi ? 'Centang semua jawaban yang benar.' : 'Pilih satu jawaban yang benar.'),
+        list, h('button', { type: 'button', class: 'small', onclick: () => rows.length < 10 && addRow('', false) }, '+ Tambah opsi')),
+      read: () => {
+        const opsi = rows.map((r, i) => ({ key: KEYS.charAt(i), teks: r.text.value.trim() }));
+        const benar = rows.map((r, i) => (r.mark.checked ? KEYS.charAt(i) : null)).filter(Boolean);
+        return { opsi, kunci: multi ? benar : (benar[0] || '') };
+      },
+    };
+  }
+
+  function pairBuilder(existing) {
+    const rows = []; const list = h('div');
+    const extra = h('textarea', null, '');
+    const addRow = (l, r) => {
+      const li = h('input', { type: 'text', value: l || '', placeholder: 'Kolom kiri' });
+      const ri = h('input', { type: 'text', value: r || '', placeholder: 'Pasangan benar (kanan)' });
+      const row = h('div', { class: 'opt-row' }, li, h('span', null, '⇄'), ri,
+        h('button', { type: 'button', class: 'small danger', onclick: () => { rows.splice(rows.indexOf(item), 1); row.remove(); } }, '×'));
+      const item = { li, ri }; rows.push(item); list.append(row);
+    };
+    if (existing) {
+      const kanan = {}; existing.opsi.kanan.forEach((x) => { kanan[x.id] = x.teks; });
+      const used = {};
+      existing.opsi.kiri.forEach((l) => { const rid = existing.kunci[l.id]; used[rid] = true; addRow(l.teks, kanan[rid]); });
+      extra.value = existing.opsi.kanan.filter((x) => !used[x.id]).map((x) => x.teks).join('\n');
+    } else { addRow('', ''); addRow('', ''); addRow('', ''); }
+    return {
+      el: h('div', null, h('p', { class: 'muted' }, 'Isi pasangan yang benar. Urutan kolom kanan akan diacak untuk siswa.'), list,
+        h('button', { type: 'button', class: 'small', onclick: () => rows.length < 20 && addRow('', '') }, '+ Tambah pasangan'),
+        h('label', { class: 'field', style: 'margin-top:.75rem' }, h('span', null, 'Pengecoh kolom kanan (opsional)'), extra, h('small', null, 'Satu per baris.'))),
+      read: () => {
+        const pairs = rows.map((r) => ({ l: r.li.value.trim(), r: r.ri.value.trim() }));
+        const kiri = pairs.map((p, i) => ({ id: 'L' + (i + 1), teks: p.l }));
+        const kanan = pairs.map((p, i) => ({ id: 'R' + (i + 1), teks: p.r }));
+        extra.value.split('\n').map((x) => x.trim()).filter(Boolean).forEach((t, j) => kanan.push({ id: 'R' + (pairs.length + j + 1), teks: t }));
+        const kunci = {}; pairs.forEach((p, i) => { kunci['L' + (i + 1)] = 'R' + (i + 1); });
+        return { opsi: { kiri, kanan }, kunci };
+      },
+    };
+  }
+
+  let current;
+  const mount = () => { current = builders[state.tipe](); body.replaceChildren(current.el); };
+  tipeSel.addEventListener('change', () => { state.tipe = tipeSel.value; mount(); });
+  mount();
+
+  const form = h('form', { onsubmit: (e) => e.preventDefault() },
+    h('label', { class: 'field' }, h('span', null, 'Tipe soal'), tipeSel),
+    h('label', { class: 'field' }, h('span', null, 'Pertanyaan *'), teks),
+    h('label', { class: 'field' }, h('span', null, 'Bobot'), bobot),
+    body);
+
+  openModal({
+    title: soal ? 'Ubah soal' : 'Tambah soal', content: form, wide: true,
+    buttons: [{ label: 'Batal' }, {
+      label: 'Simpan', kind: 'primary',
+      onClick: async () => {
+        if (!teks.value.trim()) throw { message: 'Pertanyaan wajib diisi.' };
+        const payload = Object.assign({ id: s.id, ujianId, tipe: state.tipe, teks: teks.value.trim(), bobot: Number(bobot.value) }, current.read());
+        await api('guru.soal.save', payload);
+        toast('Soal disimpan.'); onSaved();
+      },
+    }],
+  });
+}
+
+/** Ringkasan soal untuk tabel (teks + kunci). */
+function soalPreview(q) {
+  if (q.tipe === 'pg' || q.tipe === 'multi') {
+    const correct = q.tipe === 'pg' ? [q.kunci] : q.kunci;
+    return h('ol', { class: 'qpreview', type: 'A' }, q.opsi.map((o) => h('li', { class: correct.indexOf(o.key) >= 0 ? 'correct' : '' }, o.teks)));
+  }
+  if (q.tipe === 'isian') return h('div', { class: 'muted' }, 'Kunci: ' + q.kunci.join(' / '));
+  if (q.tipe === 'jodoh') {
+    const r = {}; q.opsi.kanan.forEach((x) => { r[x.id] = x.teks; });
+    return h('ul', { class: 'qpreview' }, q.opsi.kiri.map((l) => h('li', null, `${l.teks} → ${r[q.kunci[l.id]]}`)));
+  }
+  return h('div', { class: 'muted' }, q.kunci ? 'Rubrik: ' + q.kunci : 'Dinilai manual oleh guru.');
+}
+</script>

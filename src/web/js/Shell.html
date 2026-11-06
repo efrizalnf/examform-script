@@ -1,0 +1,69 @@
+<script>
+/* ===== Shell: login, kerangka layout, navigasi per peran ===== */
+const Views = { admin: [], guru: [] }; // diisi oleh AdminViews / GuruViews: {id, label, render(container)}
+
+function renderLogin() {
+  const role = h('select', { name: 'role' }, h('option', { value: 'guru' }, 'Guru'), h('option', { value: 'admin' }, 'Admin'));
+  const user = h('input', { name: 'username', autocomplete: 'username', required: true });
+  const pass = h('input', { name: 'password', type: 'password', autocomplete: 'current-password', required: true });
+  const err = h('p', { class: 'err' });
+  const btn = h('button', { class: 'primary', type: 'submit' }, 'Masuk');
+  const form = h('form', {
+    onsubmit: async (e) => {
+      e.preventDefault(); err.textContent = ''; btn.disabled = true;
+      try {
+        const r = await api('auth.login', { role: role.value, username: user.value.trim(), password: pass.value });
+        App.token = r.token; App.user = r.user; renderShell();
+      } catch (ex) { err.textContent = (ex && ex.message) || 'Gagal masuk.'; } finally { btn.disabled = false; }
+    },
+  },
+  h('label', { class: 'field' }, h('span', null, 'Masuk sebagai'), role),
+  h('label', { class: 'field' }, h('span', null, 'Username'), user),
+  h('label', { class: 'field' }, h('span', null, 'Kata sandi'), pass),
+  err, btn);
+  $('#app').replaceChildren(h('div', { class: 'login card' }, h('h1', null, 'ExamForm CBT'),
+    h('p', { class: 'muted', style: 'text-align:center' }, 'Login Admin & Guru. Siswa memakai aplikasi Android.'), form));
+}
+
+function logout(expired) {
+  App.token = null; App.user = null;
+  renderLogin();
+  if (expired) toast('Sesi berakhir, silakan login kembali.', 'error');
+}
+
+function renderShell() {
+  const views = Views[App.user.role];
+  const content = h('main', { id: 'content' });
+  const nav = h('nav', null, views.map((v) => h('button', { 'data-id': v.id, onclick: () => go(v.id) }, v.label)));
+  const go = (id) => {
+    nav.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.getAttribute('data-id') === id));
+    const view = views.find((x) => x.id === id);
+    loading(content);
+    const box = h('div');
+    content.replaceChildren(h('div', { class: 'topbar' }, h('h2', null, view.label)), box);
+    App.nav = { id, go };
+    view.render(box);
+  };
+  const aside = h('aside', null,
+    h('div', { class: 'brand' }, 'ExamForm ' + (App.user.role === 'admin' ? 'Admin' : 'Guru')),
+    nav,
+    h('div', { style: 'margin-top:1rem;padding:.5rem' },
+      h('div', null, App.user.nama), h('div', { class: 'muted' }, App.user.username),
+      h('div', { class: 'row', style: 'margin-top:.5rem' },
+        h('button', { class: 'small', onclick: changePasswordDialog }, 'Ganti sandi'),
+        h('button', { class: 'small', onclick: () => logout() }, 'Keluar'))));
+  $('#app').replaceChildren(h('div', { class: 'layout' }, aside, content));
+  go(views[0].id);
+}
+
+function changePasswordDialog() {
+  formModal({
+    title: 'Ganti kata sandi',
+    fields: [
+      { name: 'passwordLama', label: 'Kata sandi lama', type: 'password', required: true },
+      { name: 'passwordBaru', label: 'Kata sandi baru', type: 'password', required: true, hint: 'Minimal 6 karakter.' },
+    ],
+    onSubmit: async (v) => { await api('auth.changePassword', v); toast('Kata sandi diperbarui.'); },
+  });
+}
+</script>

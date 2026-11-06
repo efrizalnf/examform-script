@@ -1,0 +1,12 @@
+{
+  "name": "examform-cbt",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend CBT (Computer Based Test) berbasis Google Apps Script + Google Sheets",
+  "scripts": {
+    "test": "node tests/run.js",
+    "push": "clasp push",
+    "deploy": "clasp deploy",
+    "open": "clasp open"
+  }
+}

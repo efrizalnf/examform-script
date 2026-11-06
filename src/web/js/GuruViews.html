@@ -1,0 +1,23 @@
+<script>
+/* ===== Menu Guru ===== */
+Views.guru.push(
+  { id: 'mapel', label: 'Mapel Saya', render: guruMapelView },
+  { id: 'ujian', label: 'Ujian, Soal & Peserta', render: (box) => ujianListView(box, 'guru') }
+);
+
+function guruMapelView(box) {
+  const reload = () => guruMapelView(box);
+  loading(box);
+  api('guru.penugasan.list').then((list) => {
+    box.replaceChildren(
+      h('p', { class: 'muted' }, 'Aktifkan mapel yang akan dijadwalkan ujian. Mapel nonaktif tidak dapat dipakai membuat ujian baru dan ujiannya disembunyikan dari siswa.'),
+      h('div', { class: 'card' }, dataTable([
+        { label: 'Mata pelajaran', key: 'mapelNama' }, { label: 'Jenis ujian', key: 'jenisUjianNama' },
+        { label: 'Waktu default', render: (p) => `${p.durasiMenit} menit` }, { label: 'Status', render: (p) => badge(p.aktif) },
+        { label: 'Aksi', render: (p) => actionBtn(p.aktif ? 'Nonaktifkan' : 'Aktifkan', async () => {
+          await api('guru.penugasan.setAktif', { id: p.id, aktif: !p.aktif }); reload();
+        }, p.aktif ? 'danger' : 'primary') },
+      ], list, 'Belum ada mapel yang ditugaskan admin kepada Anda.')));
+  }).catch(fail);
+}
+</script>
