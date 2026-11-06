@@ -14,6 +14,14 @@ class SheetRepository {
     this.names = table.columns.map((c) => c.name);
     this._sheet = null;
     this._all = null;
+    this._byId = null;
+  }
+
+  /** Buang cache memori + naikkan versi cache lintas-eksekusi (dipanggil setelah setiap tulisan). */
+  _invalidate() {
+    this._all = null;
+    this._byId = null;
+    if (this.table.cache) TableCache.bump(this.table.sheet);
   }
 
   // ---------- sheet & mapping ----------
@@ -95,14 +103,42 @@ class SheetRepository {
   }
 
   // ---------- query ----------
-  findAll() {
-    if (this._all) return this._all;
+  /** Baca seluruh tabel LANGSUNG dari sheet (tanpa cache). */
+  _loadAll() {
     const sh = this.sheet();
     const last = sh.getLastRow();
-    if (last < 2) { this._all = []; return this._all; }
+    if (last < 2) return [];
     const values = sh.getRange(2, 1, last - 1, sh.getLastColumn()).getValues();
-    this._all = values.filter((r) => String(r[0]) !== '').map((r) => this._rowToObject(r));
+    return values.filter((r) => String(r[0]) !== '').map((r) => this._rowToObject(r));
+  }
+
+  findAll() {
+    if (this._all) return this._all;
+    if (this.table.cache) {
+      const hit = TableCache.get(this.table.sheet);
+      if (hit) { this._all = hit; return hit; }
+    }
+    this._all = this._loadAll();
+    if (this.table.cache) TableCache.put(this.table.sheet, this._all);
     return this._all;
+  }
+
+  /** Baca hanya kolom tertentu (jauh lebih murah daripada findAll untuk tabel besar seperti Soal). */
+  pluck(names) {
+    const sh = this.sheet();
+    const last = sh.getLastRow();
+    if (last < 2) return [];
+    const h = this._headerIndex();
+    const ids = sh.getRange(2, h.idx.id + 1, last - 1, 1).getValues();
+    const cols = names.map((n) => sh.getRange(2, h.idx[n] + 1, last - 1, 1).getValues());
+    const out = [];
+    for (let i = 0; i < ids.length; i++) {
+      if (String(ids[i][0]) === '') continue;
+      const o = {};
+      names.forEach((n, j) => { o[n] = this._fromCell(n, cols[j][i][0]); });
+      out.push(o);
+    }
+    return out;
   }
 
   where(predicate) { return this.findAll().filter(predicate); }
@@ -125,18 +161,30 @@ class SheetRepository {
 
   findById(id) {
     if (id === undefined || id === null || id === '') return null;
+    if (this.table.cache) {
+      if (!this._byId) {
+        this._byId = {};
+        this.findAll().forEach((o) => { this._byId[o.id] = o; });
+      }
+      const hit = this._byId[String(id)];
+      return hit ? Object.assign({}, hit) : null;
+    }
     const rows = this._rowsOf('id', id);
     return rows.length ? this._readRow(rows[0]) : null;
   }
 
   findBy(column, value) {
+    if (this.table.cache) {
+      const want = String(value);
+      return this.findAll().filter((o) => this._toCell(column, o[column]) === want).map((o) => Object.assign({}, o));
+    }
     return this._rowsOf(column, value).map((r) => this._readRow(r));
   }
 
   // ---------- write ----------
   insert(obj) {
     this.sheet().appendRow(this._objectToRow(obj));
-    this._all = null;
+    this._invalidate();
     return obj;
   }
 
@@ -146,7 +194,7 @@ class SheetRepository {
     const rows = objs.map((o) => this._objectToRow(o));
     const start = Math.max(sh.getLastRow(), 1) + 1;
     sh.getRange(start, 1, rows.length, rows[0].length).setNumberFormat('@').setValues(rows);
-    this._all = null;
+    this._invalidate();
     return objs;
   }
 
@@ -156,7 +204,7 @@ class SheetRepository {
     const merged = Object.assign(this._readRow(rows[0]), patch, { id: String(id) });
     const row = this._objectToRow(merged);
     this.sheet().getRange(rows[0], 1, 1, row.length).setValues([row]);
-    this._all = null;
+    this._invalidate();
     return merged;
   }
 
@@ -183,14 +231,14 @@ class SheetRepository {
       n++;
     });
     if (n) range.setValues(values);
-    this._all = null;
+    this._invalidate();
     return n;
   }
 
   /** Hapus semua baris yang memenuhi predicate (menulis ulang isi sheet sekali). */
   deleteWhere(predicate) {
     return Lock.run(() => {
-      const all = this.findAll();
+      const all = this._loadAll();
       const keep = all.filter((o) => !predicate(o));
       const removed = all.length - keep.length;
       if (!removed) return 0;
@@ -200,7 +248,7 @@ class SheetRepository {
       if (keep.length) {
         sh.getRange(2, 1, keep.length, width).setNumberFormat('@').setValues(keep.map((o) => this._objectToRow(o)));
       }
-      this._all = null;
+      this._invalidate();
       return removed;
     });
   }
@@ -209,7 +257,7 @@ class SheetRepository {
     return Lock.run(() => {
       const rows = this._rowsOf('id', id).sort((a, b) => b - a);
       rows.forEach((r) => this.sheet().deleteRow(r));
-      this._all = null;
+      this._invalidate();
       return rows.length > 0;
     });
   }
@@ -218,7 +266,7 @@ class SheetRepository {
     return Lock.run(() => {
       const rows = this._rowsOf(column, value).sort((a, b) => b - a);
       rows.forEach((r) => this.sheet().deleteRow(r));
-      this._all = null;
+      this._invalidate();
       return rows.length;
     });
   }

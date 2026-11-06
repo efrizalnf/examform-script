@@ -15,7 +15,7 @@ const SharedController = {
       'soal.remove': { roles: AG, handle: (x, d) => c('soalService').remove(x.principal, d.id) },
       'peserta.get': { roles: AG, handle: (x, d) => c('pesertaService').get(x.principal, d.ujianId) },
       'peserta.set': { roles: AG, handle: (x, d) => c('pesertaService').set(x.principal, d.ujianId, d.nisList) },
-      'hasil.syncForm': { roles: AG, handle: (x, d) => c('formResultService').sync(x.principal, d.ujianId) },
+      'hasil.syncForm': { roles: AG, handle: (x, d) => c('formResultService').sync(x.principal, d.ujianId, { penuh: d.penuh === true }) },
       'ujian.generateKodeKeluar': { roles: AG, handle: (x, d) => c('ujianService').generateKodeKeluar(x.principal, d.id) },
       'ujian.generateToken': { roles: AG, handle: (x, d) => c('ujianService').generateToken(x.principal, d.id) },
       'soal.list': { roles: AG, handle: (x, d) => c('soalService').list(x.principal, d.ujianId) },

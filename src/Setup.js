@@ -44,6 +44,23 @@ function resetAdminPassword() {
   console.log(`Password admin baru: ${r.password}`);
 }
 
+/**
+ * Diagnosa izin Google Forms. Jalankan dari editor Apps Script (pilih fungsi ini -> Run).
+ * - Jika izin belum disetujui, dialog "Authorization required" akan muncul di sini.
+ * - Hasil ditulis ke Execution log. Membuat 1 form uji "ExamForm - tes izin" di Drive
+ *   Anda (hapus manual setelah berhasil).
+ */
+function diagnosaIzinForms() {
+  const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+  console.log('Status otorisasi: ' + info.getAuthorizationStatus());
+  if (String(info.getAuthorizationStatus()) !== String(ScriptApp.AuthorizationStatus.NOT_REQUIRED)) {
+    console.log('Izin BELUM lengkap. Buka URL ini sebagai pemilik script, setujui, lalu jalankan ulang: ' + info.getAuthorizationUrl());
+  }
+  const form = FormApp.create('ExamForm - tes izin (boleh dihapus)');
+  console.log('BERHASIL membuat form uji: ' + form.getEditUrl());
+  return form.getEditUrl();
+}
+
 function _removeDefaultSheet() {
   const ss = SpreadsheetProvider.get();
   ['Sheet1', 'Lembar1'].forEach((n) => {

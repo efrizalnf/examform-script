@@ -3,7 +3,7 @@ class FormDeployService {
   constructor(deps) { Object.assign(this, deps); }
 
   _activeSoal(ujianId) {
-    return this.soal.where((s) => s.ujianId === ujianId && s.aktif).sort((a, b) => a.urutan - b.urutan);
+    return this.soal.findBy('ujianId', ujianId).filter((s) => s.aktif).sort((a, b) => a.urutan - b.urutan);
   }
 
   /** Deploy pertama = buat form baru; deploy ulang = bangun ulang isi form yang sama (link tetap). */
@@ -17,17 +17,27 @@ class FormDeployService {
     if (!soalList.length) throw Errors.rule('TIDAK_ADA_SOAL', 'Ujian belum memiliki soal aktif.');
     const plan = FormPlanService.build(soalList);
 
-    const r = this.forms.deploy({
-      title: u.judul, description: u.deskripsi, shuffle: u.acakSoal, accepting: u.aktif,
-      plan, existingFormId: u.formId || null,
-    });
+    let r;
+    try {
+      r = this.forms.deploy({
+        title: u.judul, description: u.deskripsi, shuffle: u.acakSoal, accepting: u.aktif,
+        plan, existingFormId: u.formId || null,
+      });
+    } catch (e) {
+      // Tampilkan penyebab asli ke admin/guru (bukan "kesalahan pada server" yang generik).
+      Log.error('Deploy Google Form gagal', e, { ujianId });
+      const raw = String((e && e.message) || e);
+      const izin = /permission|authori[sz]|izin|forms\.currentonly|script\.forms|auth\/forms/i.test(raw);
+      throw Errors.rule('FORM_GAGAL', 'Gagal membuat Google Form: ' + raw.slice(0, 300) +
+        (izin ? ' — Jalankan fungsi "setup" sekali dari editor Apps Script untuk menyetujui izin Google Forms, lalu buat versi deployment baru.' : ''));
+    }
 
     const map = FormPlanService.itemMap(plan, r.itemIds);
     this.soal.updateMany(Object.keys(map).reduce((acc, id) => { acc[id] = { formItems: map[id] }; return acc; }, {}));
     this.ujian.update(u.id, {
       formId: r.formId, formUrl: r.formUrl, formEditUrl: r.formEditUrl,
       formNisItemId: r.nisItemId, formNamaItemId: r.namaItemId,
-      formDeployedAt: Clock.iso(), formAccepting: !!u.aktif, formStale: false,
+      formDeployedAt: Clock.iso(), formAccepting: !!u.aktif, formStale: false, formSyncedAt: '',
     });
     return { formId: r.formId, formUrl: r.formUrl, formEditUrl: r.formEditUrl, jumlahItem: plan.length, baru: !u.formId };
   }

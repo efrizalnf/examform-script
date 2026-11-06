@@ -5,12 +5,13 @@ class UjianService {
 
   _enrich(list) {
     const guru = this._lookup(this.users), mapel = this._lookup(this.mapel), jenis = this._lookup(this.jenis);
-    const soal = this.soal.findAll(), peserta = this.peserta.findAll();
+    // Hanya kolom yang dibutuhkan (tabel Soal bisa besar: jangan memuat seluruh isinya hanya untuk menghitung).
+    const nSoal = {}, nAktif = {}, nPeserta = {};
+    this.soal.pluck(['ujianId', 'aktif']).forEach((s) => { nSoal[s.ujianId] = (nSoal[s.ujianId] || 0) + 1; if (s.aktif) nAktif[s.ujianId] = (nAktif[s.ujianId] || 0) + 1; });
+    this.peserta.pluck(['ujianId']).forEach((p) => { nPeserta[p.ujianId] = (nPeserta[p.ujianId] || 0) + 1; });
     return list.map((u) => Object.assign({}, u, {
       guruNama: guru[u.guruId] || '-', mapelNama: mapel[u.mapelId] || '-', jenisUjianNama: jenis[u.jenisUjianId] || '-',
-      jumlahSoal: soal.filter((s) => s.ujianId === u.id).length,
-      jumlahSoalAktif: soal.filter((s) => s.ujianId === u.id && s.aktif).length,
-      jumlahPeserta: peserta.filter((p) => p.ujianId === u.id).length,
+      jumlahSoal: nSoal[u.id] || 0, jumlahSoalAktif: nAktif[u.id] || 0, jumlahPeserta: nPeserta[u.id] || 0,
       mode: u.formId ? EXAM_MODE.GFORM : EXAM_MODE.NATIVE,
     }));
   }
@@ -96,7 +97,7 @@ class UjianService {
     const u = this.ujian.findById(id);
     AccessPolicy.assertCanManageUjian(principal, u);
     const on = Validate.bool(aktif);
-    if (on && !this.soal.where((s) => s.ujianId === id && s.aktif).length) {
+    if (on && !this.soal.findBy('ujianId', id).filter((s) => s.aktif).length) {
       throw Errors.rule('TIDAK_ADA_SOAL', 'Ujian belum memiliki soal aktif.');
     }
     const patch = { aktif: on };

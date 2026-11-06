@@ -2,6 +2,33 @@
 /* ===== Shell: login, kerangka layout, navigasi per peran ===== */
 const Views = { admin: [], guru: [] }; // diisi oleh AdminViews / GuruViews: {id, label, render(container)}
 
+/**
+ * Sesi login disimpan di sessionStorage (hilang saat tab ditutup) agar refresh halaman tidak
+ * memaksa login ulang. Aman-gagal: bila storage diblokir, perilaku kembali seperti semula.
+ * Token tetap divalidasi server pada panggilan berikutnya (UNAUTHORIZED -> logout otomatis).
+ */
+const SessionStore = {
+  KEY: 'examform.session',
+  save() {
+    try { sessionStorage.setItem(this.KEY, JSON.stringify({ token: App.token, user: App.user, nav: App.nav && App.nav.id })); } catch (e) { /* abaikan */ }
+  },
+  load() {
+    try {
+      const s = JSON.parse(sessionStorage.getItem(this.KEY) || 'null');
+      return s && s.token && s.user && s.user.role ? s : null;
+    } catch (e) { return null; }
+  },
+  clear() { try { sessionStorage.removeItem(this.KEY); } catch (e) { /* abaikan */ } },
+};
+
+/** Dipanggil saat halaman dibuka: pulihkan sesi (jika ada) atau tampilkan login. */
+function boot() {
+  const s = SessionStore.load();
+  if (!s || !Views[s.user.role]) return renderLogin();
+  App.token = s.token; App.user = s.user;
+  renderShell(s.nav);
+}
+
 function renderLogin() {
   const role = h('select', { name: 'role' }, h('option', { value: 'guru' }, 'Guru'), h('option', { value: 'admin' }, 'Admin'));
   const user = h('input', { name: 'username', autocomplete: 'username', required: true });
@@ -13,7 +40,7 @@ function renderLogin() {
       e.preventDefault(); err.textContent = ''; btn.disabled = true;
       try {
         const r = await api('auth.login', { role: role.value, username: user.value.trim(), password: pass.value });
-        App.token = r.token; App.user = r.user; renderShell();
+        App.token = r.token; App.user = r.user; SessionStore.save(); prefetchFirstScreens(); renderShell();
       } catch (ex) { err.textContent = (ex && ex.message) || 'Gagal masuk.'; } finally { btn.disabled = false; }
     },
   },
@@ -25,13 +52,24 @@ function renderLogin() {
     h('p', { class: 'muted', style: 'text-align:center' }, 'Login Admin & Guru. Siswa memakai aplikasi Android.'), form));
 }
 
+/** Minta data layar pertama + layar daftar ujian (paling berat) paralel saat shell dirender. */
+function prefetchFirstScreens() {
+  if (App.user.role === 'admin') {
+    Prefetch.start('admin.guru.list');
+    Prefetch.start('ujian.list'); Prefetch.start('admin.penugasan.list');
+  } else {
+    Prefetch.start('guru.penugasan.list');
+    Prefetch.start('ujian.list');
+  }
+}
+
 function logout(expired) {
-  App.token = null; App.user = null;
+  App.token = null; App.user = null; SessionStore.clear();
   renderLogin();
   if (expired) toast('Sesi berakhir, silakan login kembali.', 'error');
 }
 
-function renderShell() {
+function renderShell(startId) {
   const views = Views[App.user.role];
   const content = h('main', { id: 'content' });
   const nav = h('nav', null, views.map((v) => h('button', { 'data-id': v.id, onclick: () => go(v.id) }, v.label)));
@@ -42,6 +80,7 @@ function renderShell() {
     const box = h('div');
     content.replaceChildren(h('div', { class: 'topbar' }, h('h2', null, view.label)), box);
     App.nav = { id, go };
+    SessionStore.save();
     view.render(box);
   };
   const aside = h('aside', null,
@@ -53,7 +92,7 @@ function renderShell() {
         h('button', { class: 'small', onclick: changePasswordDialog }, 'Ganti sandi'),
         h('button', { class: 'small', onclick: () => logout() }, 'Keluar'))));
   $('#app').replaceChildren(h('div', { class: 'layout' }, aside, content));
-  go(views[0].id);
+  go(startId && views.some((v) => v.id === startId) ? startId : views[0].id);
 }
 
 function changePasswordDialog() {

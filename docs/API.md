@@ -152,7 +152,7 @@ dan *screen pinning* untuk mode ujian; blokir tombol "mulai" saat `bisaMulai=fal
 ## Endpoint admin & guru (dipakai Web UI)
 
 Rute bersama admin **dan** guru (guru dibatasi ke ujiannya sendiri; admin atas semua ujian, membuat ujian atas nama guru pemilik penugasan):
-`ujian.list|save|remove|setAktif|generateToken|generateKodeKeluar|deployForm`, `soal.list|save|remove|setAktif`, `peserta.get|set`, `hasil.list|detail|nilaiEssay|syncForm`.
+`ujian.list|save|remove|setAktif|generateToken|generateKodeKeluar|deployForm`, `soal.list|save|remove|setAktif`, `peserta.get|set`, `hasil.list|detail|nilaiEssay|syncForm` (`syncForm` menerima `penuh: true` untuk membaca ulang semua respons; default inkremental).
 
 - `ujian.deployForm {id}` → `{formId, formUrl, formEditUrl, jumlahItem, baru}`. Membuat Google Form dari soal aktif (deploy pertama) atau membangun ulang isinya (link tetap). Ditolak bila sudah ada siswa yang mengerjakan.
 - `hasil.syncForm {ujianId}` → `{disinkronkan, dilewati, tanpaSesi[], ganda, tanpaNis, terlambat, perluKoreksi, belumMengumpulkan}`. Inkremental dan aman diulang.

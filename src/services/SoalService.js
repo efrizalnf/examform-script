@@ -11,7 +11,7 @@ class SoalService {
 
   list(principal, ujianId) {
     this._ujianFor(principal, ujianId);
-    return this.soal.where((s) => s.ujianId === ujianId).sort((a, b) => a.urutan - b.urutan);
+    return this.soal.findBy('ujianId', ujianId).sort((a, b) => a.urutan - b.urutan);
   }
 
   /** Soal berubah setelah deploy -> form Google tidak lagi sama dengan bank soal. */
@@ -44,7 +44,7 @@ class SoalService {
       this._markStale(input.ujianId);
       return saved;
     }
-    const existing = this.soal.where((s) => s.ujianId === input.ujianId);
+    const existing = this.soal.findBy('ujianId', input.ujianId);
     const urutan = existing.reduce((m, s) => Math.max(m, s.urutan || 0), 0) + 1;
     const row = {
       id: Ids.next('soal'), ujianId: input.ujianId, tipe: handler.type, teks, opsi: norm.opsi,

@@ -59,6 +59,12 @@ const login = (role, u, p) => must(call('auth.login', { role, username: u, passw
   const dep2 = must(call('ujian.deployForm', { id: U }, A), 'redeploy');
   check('deploy ulang memakai form yang sama (link tetap)', dep2.formId === dep.formId && dep2.baru === false && forms[dep.formId].items.length === 9);
 
+  console.log('# kegagalan FormApp ditampilkan jelas (bukan "kesalahan server")');
+  run('globalThis.__origDeploy = FormGateway.prototype.deploy; FormGateway.prototype.deploy = function () { throw new Error("You do not have permission to call FormApp.create. Required permissions: https://www.googleapis.com/auth/forms"); };');
+  const bad = call('ujian.deployForm', { id: U }, G);
+  check('deploy gagal -> FORM_GAGAL + pesan asli + petunjuk setup', bad.error.code === 'FORM_GAGAL' && /permission/.test(bad.error.message) && /setup/.test(bad.error.message), bad.error);
+  run('FormGateway.prototype.deploy = globalThis.__origDeploy;');
+
   console.log('# aktif/nonaktif ikut membuka/menutup form');
   must(call('ujian.setAktif', { id: U, aktif: true }, G), 'aktif2');
   check('ujian aktif -> form menerima jawaban', form.accepting === true);
@@ -92,6 +98,20 @@ const login = (role, u, p) => must(call('auth.login', { role, username: u, passw
   check('guru lain tidak boleh generate kode keluar', call('ujian.generateKodeKeluar', { id: U }, login('guru', 'joko', guru2.password)).error.code === 'FORBIDDEN');
   must(call('siswa.ujian.start', { ujianId: U, token: u.token }, S3), 'start3');
 
+  console.log('# cache lintas-eksekusi (tiap panggilan = eksekusi baru)');
+  const fresh = () => run('Container.reset(); SpreadsheetProvider._cached = null;');
+  fresh(); const g1 = must(call('admin.guru.list', {}, A), 'guru1'); fresh(); const g2 = must(call('admin.guru.list', {}, A), 'guru2 (dari cache)');
+  check('daftar dari cache sama dengan pembacaan sheet', JSON.stringify(g1) === JSON.stringify(g2) && g1.length >= 1);
+  must(call('admin.guru.save', { id: guru.id, username: 'sari', nama: 'Bu Sari Baru' }, A), 'ubah guru');
+  fresh(); check('tulisan membatalkan cache (nama baru langsung terlihat)', must(call('admin.guru.list', {}, A), 'guru3').some((x) => x.nama === 'Bu Sari Baru'));
+  fresh(); const ul1 = must(call('ujian.list', {}, A), 'ul1'); fresh(); const ul2 = must(call('ujian.list', {}, A), 'ul2');
+  check('ujian.list konsisten (jumlah soal/peserta dihitung tanpa memuat seluruh Soal)', JSON.stringify(ul1) === JSON.stringify(ul2) && ul1[0].jumlahSoal === 5 && ul1[0].jumlahPeserta === 3, ul1[0] && { s: ul1[0].jumlahSoal, p: ul1[0].jumlahPeserta });
+  fresh(); check('sesi login tetap valid pada eksekusi baru (users dari cache)', call('admin.guru.list', {}, A).success === true);
+  const big = 'x'.repeat(95000) + 'é€';
+  run(`ChunkCache.put('t:big', ${JSON.stringify(big)}, 60)`);
+  check('ChunkCache memecah & merakit string >100KB', run("ChunkCache.get('t:big')") === big);
+  check('ChunkCache.get kunci tak ada -> null', run("ChunkCache.get('t:none')") === null);
+
   console.log('# sinkron respons Form -> nilai');
   const items = Object.fromEntries(['nis', 'nama'].map((k, i) => [k, form.items[i].id]));
   const q = (n) => form.items[2 + n].id; // 1..6
@@ -118,7 +138,13 @@ const login = (role, u, p) => must(call('auth.login', { role, username: u, passw
   const sc = must(call('hasil.nilaiEssay', { sesiId: byNis('001').sesiId, soalId: essayId, skor: 4 }, G), 'essay');
   check('nilai akhir 100 setelah essay dinilai', sc.nilai === 100 && sc.perluKoreksi === false, sc);
   const sync2 = must(call('hasil.syncForm', { ujianId: U }, G), 'sync2');
-  check('sinkron ulang inkremental (tidak menimpa nilai essay)', sync2.disinkronkan === 0 && sync2.dilewati === 3);
+  check('sinkron ulang inkremental: tidak membaca ulang respons lama', sync2.baru === 0 && sync2.disinkronkan === 0);
+  const sync2p = must(call('hasil.syncForm', { ujianId: U, penuh: true }, G), 'sync2p');
+  check('sinkron penuh: respons lama dilewati, tidak menimpa nilai essay', sync2p.disinkronkan === 0 && sync2p.dilewati === 3 && sync2p.ganda === 1);
+  form.__addResponse(Date.now() + 40 * 60000, full('001', { [q(1)]: 'Ribosom' })); // kiriman ganda SESUDAH sinkron
+  const sync2g = must(call('hasil.syncForm', { ujianId: U }, G), 'sync2g');
+  check('sinkron inkremental: hanya respons baru; kiriman ganda lintas-sinkron tidak menimpa', sync2g.baru === 1 && sync2g.ganda === 1 && sync2g.disinkronkan === 0, sync2g);
+  check('trigger menyinkronkan ujian aktif tanpa error', typeof run("Container.get('formResultService').syncActive()") === 'number');
   hasil = must(call('hasil.list', { ujianId: U }, G), 'hasil2');
   check('nilai 001 tetap 100 setelah sinkron ulang', byNis('001') && hasil.find((h) => h.nis === '001').nilai === 100);
   const d2 = must(call('hasil.detail', { sesiId: hasil.find((h) => h.nis === '002').sesiId }, G), 'detail2');

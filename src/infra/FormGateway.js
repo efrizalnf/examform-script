@@ -72,9 +72,15 @@ class FormGateway {
     return resp.toPrefilledUrl();
   }
 
-  /** @returns {{id, timestamp(ISO), answers:{itemId: respons mentah}}[]} */
-  readResponses(formId) {
-    return FormApp.openById(formId).getResponses().map((r) => {
+  /**
+   * @param {string} formId
+   * @param {string=} afterIso hanya respons SETELAH waktu ini (sinkron inkremental, jauh lebih cepat)
+   * @returns {{id, timestamp(ISO), answers:{itemId: respons mentah}}[]}
+   */
+  readResponses(formId, afterIso) {
+    const form = FormApp.openById(formId);
+    const list = afterIso ? form.getResponses(new Date(afterIso)) : form.getResponses();
+    return list.map((r) => {
       const answers = {};
       r.getItemResponses().forEach((ir) => { answers[String(ir.getItem().getId())] = ir.getResponse(); });
       return { id: r.getId(), timestamp: r.getTimestamp().toISOString(), answers };

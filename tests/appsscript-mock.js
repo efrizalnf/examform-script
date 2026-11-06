@@ -98,8 +98,8 @@ class MockForm {
       toPrefilledUrl: () => 'https://docs.google.com/forms/d/e/' + this.id + '/viewform?usp=pp_url' + r.items.map((x) => '&entry.' + x.item.id + '=' + encodeURIComponent(x.value)).join('') };
     return r;
   }
-  getResponses() {
-    return this.responses.map((r) => ({
+  getResponses(after) {
+    return this.responses.filter((r) => !after || r.ts > after.getTime()).map((r) => ({
       getId: () => r.id, getTimestamp: () => new Date(r.ts),
       getItemResponses: () => Object.keys(r.answers).map((id) => ({ getItem: () => ({ getId: () => Number(id) }), getResponse: () => r.answers[id] })),
     }));
@@ -133,7 +133,11 @@ function createGlobals() {
         Charset: { UTF_8: 'UTF_8' },
       },
       PropertiesService: { getScriptProperties: () => ({ getProperty: (k) => props[k] || null, setProperty: (k, v) => { props[k] = v; } }) },
-      CacheService: { getScriptCache: () => ({ get: (k) => cacheStore[k] || null, put: (k, v) => { cacheStore[k] = v; }, remove: (k) => { delete cacheStore[k]; } }) },
+      CacheService: { getScriptCache: () => ({
+        get: (k) => (k in cacheStore ? cacheStore[k] : null), put: (k, v) => { cacheStore[k] = v; }, remove: (k) => { delete cacheStore[k]; },
+        getAll: (ks) => { const o = {}; ks.forEach((k) => { if (k in cacheStore) o[k] = cacheStore[k]; }); return o; },
+        putAll: (obj) => { Object.keys(obj).forEach((k) => { cacheStore[k] = obj[k]; }); },
+      }) },
       LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
       SpreadsheetApp: { getActiveSpreadsheet: () => ss, openById: () => ss },
       ScriptApp: {

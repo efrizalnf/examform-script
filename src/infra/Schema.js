@@ -6,7 +6,7 @@
  */
 const Schema = {
   users: {
-    sheet: 'Users',
+    sheet: 'Users', cache: true,
     columns: [
       { name: 'id' }, { name: 'username' }, { name: 'nama' },
       { name: 'role' }, // admin | guru
@@ -15,7 +15,7 @@ const Schema = {
     ],
   },
   siswa: {
-    sheet: 'Siswa', minRows: 5000,
+    sheet: 'Siswa', minRows: 5000, cache: true,
     columns: [
       { name: 'id' }, // = nis
       { name: 'nis' }, { name: 'nama' }, { name: 'kelas' }, { name: 'jenjang' },
@@ -24,23 +24,23 @@ const Schema = {
     ],
   },
   mapel: {
-    sheet: 'Mapel',
+    sheet: 'Mapel', cache: true,
     columns: [{ name: 'id' }, { name: 'nama' }],
   },
   jenisUjian: {
-    sheet: 'JenisUjian',
+    sheet: 'JenisUjian', cache: true,
     columns: [{ name: 'id' }, { name: 'nama' }],
   },
   /** Penugasan guru: guru + mapel + jenis ujian + waktu ujian default. `aktif` diatur guru. */
   penugasan: {
-    sheet: 'Penugasan',
+    sheet: 'Penugasan', cache: true,
     columns: [
       { name: 'id' }, { name: 'guruId' }, { name: 'mapelId' }, { name: 'jenisUjianId' },
       { name: 'durasiMenit', type: 'number' }, { name: 'aktif', type: 'bool' },
     ],
   },
   ujian: {
-    sheet: 'Ujian',
+    sheet: 'Ujian', cache: true,
     columns: [
       { name: 'id' }, { name: 'guruId' }, { name: 'penugasanId' },
       { name: 'mapelId' }, { name: 'jenisUjianId' },
@@ -58,6 +58,7 @@ const Schema = {
       { name: 'formNisItemId' }, { name: 'formNamaItemId' },
       { name: 'formDeployedAt' },
       { name: 'formAccepting', type: 'bool' }, // form menerima jawaban
+      { name: 'formSyncedAt' }, // timestamp respons Form terakhir yang diproses (sinkron inkremental)
       { name: 'formStale', type: 'bool' },     // soal berubah setelah deploy -> perlu deploy ulang
     ],
   },

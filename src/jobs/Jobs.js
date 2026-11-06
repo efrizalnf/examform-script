@@ -12,4 +12,11 @@ function finalizeExpiredSessionsJob() {
   } catch (e) {
     Log.error('closeExpiredForms gagal', e);
   }
+  try {
+    // Sinkron hasil Google Form otomatis (inkremental) agar nilai sudah siap saat guru membukanya.
+    const s = Container.get('formResultService').syncActive();
+    if (s) Log.info('Sinkron Form otomatis', { ujian: s });
+  } catch (e) {
+    Log.error('syncActive gagal', e);
+  }
 }

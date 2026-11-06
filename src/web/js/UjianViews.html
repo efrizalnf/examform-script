@@ -159,16 +159,19 @@ function hasilView(box, ujian, back) {
       { label: 'Catatan', render: (r) => h('div', { class: 'row' }, r.perluKoreksi ? h('span', { class: 'badge warn' }, 'Essay belum dinilai') : null, r.terlambat ? h('span', { class: 'badge warn' }, 'Terlambat') : null) },
       { label: 'Aksi', render: (r) => r.menungguSinkron ? '' : actionBtn('Detail', async () => hasilDetail(r.sesiId, reload)) },
     ];
-    const syncBtn = ujian.formId ? actionBtn('Sinkronkan hasil dari Google Form', async () => {
-      toast('Mengambil respons dari Google Form…');
-      const r = await api('hasil.syncForm', { ujianId: ujian.id });
+    const doSync = (penuh) => async () => {
+      toast(penuh ? 'Membaca ULANG semua respons Google Form (bisa agak lama)…' : 'Mengambil respons baru dari Google Form…');
+      const r = await api('hasil.syncForm', { ujianId: ujian.id, penuh });
       toast(`Sinkron: ${r.disinkronkan} baru, ${r.dilewati} sudah ada, ${r.belumMengumpulkan} belum mengumpulkan` +
         (r.terlambat ? `, ${r.terlambat} terlambat` : '') + (r.ganda ? `, ${r.ganda} kiriman ganda diabaikan` : '') +
         (r.tanpaSesi.length ? `, NIS tanpa sesi: ${r.tanpaSesi.join(', ')}` : '') + '.');
       reload();
-    }, 'primary') : null;
+    };
+    const syncBtn = ujian.formId ? h('div', { class: 'row' },
+      actionBtn('Sinkronkan hasil dari Google Form', doSync(false), 'primary'),
+      actionBtn('Sinkron ulang penuh', doSync(true))) : null;
     box.replaceChildren(backBar(`Hasil — ${ujian.judul}`, back),
-      syncBtn && h('div', { class: 'row', style: 'margin-bottom:1rem' }, syncBtn, h('span', { class: 'muted' }, 'Nilai muncul setelah sinkron. Boleh dijalankan berulang.')),
+      syncBtn && h('div', { class: 'row', style: 'margin-bottom:1rem' }, syncBtn, h('span', { class: 'muted' }, 'Hanya respons baru yang dibaca; sinkron otomatis juga berjalan tiap ±5 menit selama ujian aktif.')),
       h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada siswa yang mengerjakan.')));
   }).catch(fail);
 }

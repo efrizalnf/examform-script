@@ -21,7 +21,31 @@ function h(tag, attrs, ...kids) {
   return e;
 }
 
-function api(action, data) {
+/**
+ * Prefetch: data yang pasti dibutuhkan layar pertama diminta paralel segera setelah login,
+ * sehingga saat layar dibuka datanya sering sudah tiba (dipakai sekali lalu dibuang).
+ */
+const Prefetch = {
+  _p: {},
+  _key(action, data) { return action + '|' + JSON.stringify(data || {}); },
+  start(action, data) {
+    const k = this._key(action, data);
+    const p = api(action, data, true);
+    p.catch(() => {}); // kegagalan prefetch tidak boleh mengganggu; panggilan asli akan mengulang
+    this._p[k] = { p, t: Date.now() };
+  },
+  take(action, data) {
+    const k = this._key(action, data); const e = this._p[k]; delete this._p[k];
+    return e && Date.now() - e.t < 30000 ? e.p : null;
+  },
+};
+
+function api(action, data, skipPrefetch) {
+  if (!/\.(list|get)$/.test(action)) Prefetch._p = {}; // ada perubahan data -> buang prefetch agar tidak basi
+  if (!skipPrefetch) {
+    const pre = Prefetch.take(action, data);
+    if (pre) return pre.catch(() => api(action, data, true));
+  }
   return new Promise((resolve, reject) => {
     google.script.run
       .withSuccessHandler((text) => {

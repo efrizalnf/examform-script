@@ -13,14 +13,16 @@ const fs = require('fs');
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   await page.exposeFunction('__apiRequest', (text) => run(`apiRequest(${JSON.stringify(text)})`));
   const html = renderIndex();
-  await page.setContent(html);
-  await page.evaluate(() => {
+  // Disajikan lewat http:// (bukan about:blank) agar sessionStorage berfungsi & refresh sungguhan bisa diuji.
+  await page.route('http://examform.test/', (r) => r.fulfill({ contentType: 'text/html', body: html }));
+  await page.addInitScript(() => {
     function mk() { return { _s: () => {}, _f: () => {},
       withSuccessHandler(cb) { const n = mk(); n._s = cb; n._f = this._f; return n; },
       withFailureHandler(cb) { const n = mk(); n._f = cb; n._s = this._s; return n; },
       apiRequest(t) { window.__apiRequest(t).then(this._s, (e) => this._f(e)); } }; }
     window.google = { script: { run: mk() } };
   });
+  await page.goto('http://examform.test/');
   const steps = [];
   const ok = (name, cond) => { steps.push([name, !!cond]); console.log((cond ? '  ok  ' : '  FAIL ') + name); };
 
@@ -31,6 +33,12 @@ const fs = require('fs');
   await page.click('button[type=submit]');
   await page.waitForSelector('aside nav button');
   ok('admin masuk & menu tampil', (await page.locator('aside nav button').count()) === 6);
+
+  // refresh halaman sungguhan -> sesi login dipulihkan (tidak kembali ke login)
+  ok('sesi login tersimpan di sessionStorage', (await page.evaluate(() => sessionStorage.getItem('examform.session') || '')).includes('"token"'));
+  await page.reload();
+  await page.waitForSelector('aside nav button');
+  ok('setelah refresh tetap masuk (tidak ke halaman login)', (await page.locator('aside nav button').count()) === 6 && (await page.locator('select[name=role]').count()) === 0);
 
   const nav = async (label) => { await page.click(`aside nav button:has-text("${label}")`); await page.waitForTimeout(150); };
   // mapel
