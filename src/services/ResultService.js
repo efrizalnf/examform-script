@@ -9,14 +9,17 @@ class ResultService {
   }
 
   listByUjian(principal, ujianId) {
-    this._ujian(principal, ujianId);
+    const u = this._ujian(principal, ujianId);
     const siswa = {}; this.siswa.findAll().forEach((s) => { siswa[s.nis] = s; });
     return this.sesi.findBy('ujianId', ujianId).map((s) => {
       const sw = siswa[s.nis] || {};
+      // mode Google Form: nilai baru ada setelah respons disinkronkan
+      const menungguSinkron = !!u.formId && !s.formResponseId;
       return {
         sesiId: s.id, nis: s.nis, nama: sw.nama || '-', kelas: sw.kelas || '-', status: s.status,
-        mulai: s.mulai, selesai: s.selesai, nilai: s.status === SESSION_STATUS.SELESAI ? s.nilai : null,
-        perluKoreksi: s.perluKoreksi,
+        mulai: s.mulai, selesai: s.selesai,
+        nilai: s.status === SESSION_STATUS.SELESAI && !menungguSinkron ? s.nilai : null,
+        perluKoreksi: s.perluKoreksi, terlambat: !!s.terlambat, menungguSinkron,
       };
     }).sort((a, b) => String(a.kelas + a.nama).localeCompare(b.kelas + b.nama));
   }
@@ -26,17 +29,19 @@ class ResultService {
     if (!s) throw Errors.notFound('Sesi');
     this._ujian(principal, s.ujianId);
     const bank = {}; this.soal.findBy('ujianId', s.ujianId).forEach((q) => { bank[q.id] = q; });
-    const ans = {}; this.jawaban.findBy('sesiId', sesiId).forEach((j) => { ans[j.soalId] = j; });
+    const rows = {}; this.jawaban.findBy('sesiId', sesiId).forEach((j) => { rows[j.soalId] = j; });
+    const bulk = s.jawabanForm || {};
     return {
       sesi: s,
-      soal: (s.layout.soal || []).map((id, i) => {
+      soal: ((s.layout && s.layout.soal) || []).map((id, i) => {
         const q = bank[id]; if (!q) return null;
-        const h = QuestionTypeRegistry.get(q.tipe); const a = ans[id];
+        const h = QuestionTypeRegistry.get(q.tipe); const a = rows[id];
+        const given = a && a.jawaban !== null && a.jawaban !== undefined ? a.jawaban : (bulk[id] === undefined ? null : bulk[id]);
         const manual = h.manual;
         return {
           nomor: i + 1, soalId: id, tipe: q.tipe, teks: q.teks, opsi: q.opsi, kunci: q.kunci, bobot: q.bobot,
-          jawaban: a ? a.jawaban : null, manual,
-          skor: manual ? (a && a.skor !== null ? a.skor : null) : h.grade(q, a ? a.jawaban : null).ratio * q.bobot,
+          jawaban: given, manual,
+          skor: manual ? (a && a.skor !== null && a.skor !== undefined ? a.skor : null) : h.grade(q, given).ratio * q.bobot,
         };
       }).filter(Boolean),
     };

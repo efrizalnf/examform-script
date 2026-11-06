@@ -8,6 +8,7 @@ const SiswaController = {
       'siswa.ujian.start': { roles: S, handle: (x, d) => svc().start(x.principal.id, d) },
       'siswa.sesi.get': { roles: S, handle: (x, d) => svc().getSession(x.principal.id, d.sesiId) },
       'siswa.jawaban.save': { roles: S, handle: (x, d) => svc().saveAnswers(x.principal.id, d) },
+      'siswa.sesi.exit': { roles: S, handle: (x, d) => svc().verifyExitCode(x.principal.id, d) },
       'siswa.sesi.finish': { roles: S, handle: (x, d) => svc().finish(x.principal.id, d) },
     };
   },

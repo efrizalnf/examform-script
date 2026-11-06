@@ -14,6 +14,12 @@ class SoalService {
     return this.soal.where((s) => s.ujianId === ujianId).sort((a, b) => a.urutan - b.urutan);
   }
 
+  /** Soal berubah setelah deploy -> form Google tidak lagi sama dengan bank soal. */
+  _markStale(ujianId) {
+    const u = this.ujian.findById(ujianId);
+    if (u && u.formId && !u.formStale) this.ujian.update(ujianId, { formStale: true });
+  }
+
   _assertEditable(ujianId) {
     if (this.sesi.findBy('ujianId', ujianId).length) {
       throw Errors.rule('UJIAN_SUDAH_DIKERJAKAN', 'Ujian sudah dikerjakan siswa; soal tidak dapat diubah atau dihapus.');
@@ -34,7 +40,9 @@ class SoalService {
       if (!cur || cur.ujianId !== input.ujianId) throw Errors.notFound('Soal');
       const patch = { tipe: handler.type, teks, bobot, opsi: norm.opsi, kunci: norm.kunci };
       if (input.urutan !== undefined) patch.urutan = Validate.int(input.urutan, 'Urutan', { min: 1 });
-      return this.soal.update(cur.id, patch);
+      const saved = this.soal.update(cur.id, patch);
+      this._markStale(input.ujianId);
+      return saved;
     }
     const existing = this.soal.where((s) => s.ujianId === input.ujianId);
     const urutan = existing.reduce((m, s) => Math.max(m, s.urutan || 0), 0) + 1;
@@ -42,7 +50,9 @@ class SoalService {
       id: Ids.next('soal'), ujianId: input.ujianId, tipe: handler.type, teks, opsi: norm.opsi,
       kunci: norm.kunci, bobot, urutan, aktif: true, dibuatPada: Clock.iso(),
     };
-    return this.soal.insert(row);
+    const created = this.soal.insert(row);
+    this._markStale(input.ujianId);
+    return created;
   }
 
   /** Admin atau guru pemilik mengaktifkan/menonaktifkan soal. */
@@ -51,6 +61,7 @@ class SoalService {
     if (!s) throw Errors.notFound('Soal');
     this._ujianFor(principal, s.ujianId);
     this.soal.update(id, { aktif: Validate.bool(aktif) });
+    this._markStale(s.ujianId);
     return { id, aktif: Validate.bool(aktif) };
   }
 
@@ -60,6 +71,7 @@ class SoalService {
     this._ujianFor(principal, s.ujianId);
     this._assertEditable(s.ujianId);
     this.soal.delete(id);
+    this._markStale(s.ujianId);
     return { deleted: true };
   }
 }

@@ -19,6 +19,13 @@ const QuestionHelpers = {
     return String(s === undefined || s === null ? '' : s).trim().toLowerCase().replace(/\s+/g, ' ');
   },
 
+  /** Cocokkan teks pilihan hasil Google Form ke opsi (tanpa peduli spasi di tepi). */
+  matchOption(options, text) {
+    if (text === undefined || text === null) return null;
+    const t = String(text).trim();
+    return options.find((o) => String(o.teks).trim() === t) || null;
+  },
+
   /** Susun ulang opsi sesuai layout (urutan key). */
   orderByKeys(options, keys) {
     if (!keys) return options;

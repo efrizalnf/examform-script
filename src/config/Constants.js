@@ -4,7 +4,7 @@
  */
 const APP = Object.freeze({
   NAME: 'ExamForm CBT',
-  VERSION: '1.0.0',
+  VERSION: '1.2.0',
   TIMEZONE: 'Asia/Jakarta',
 });
 
@@ -30,6 +30,18 @@ const STUDENT_EXAM_STATUS = Object.freeze({
   SELESAI: 'selesai',
 });
 
+/** Mode pengerjaan ujian. gform = soal dikerjakan di Google Form (WebView); native = soal dirender aplikasi. */
+const EXAM_MODE = Object.freeze({ GFORM: 'gform', NATIVE: 'native' });
+
+const FORM = Object.freeze({
+  LATE_GRACE_SECONDS: 90,
+  CLOSE_GRACE_SECONDS: 120,
+  NIS_TITLE: 'NIS',
+  NAMA_TITLE: 'Nama',
+  MAX_ANSWER_CHARS: 4000,
+  MAX_CELL_CHARS: 45000,
+});
+
 const PROP = Object.freeze({
   SPREADSHEET_ID: 'SPREADSHEET_ID',
   AUTH_SECRET: 'AUTH_SECRET',
@@ -45,6 +57,7 @@ const AUTH = Object.freeze({
 
 const EXAM = Object.freeze({
   EXAM_TOKEN_LENGTH: 6,
+  EXIT_CODE_LENGTH: 6,
   GRACE_SECONDS: 5,
   DEFAULT_DURATION_MINUTES: 60,
   MAX_DURATION_MINUTES: 600,

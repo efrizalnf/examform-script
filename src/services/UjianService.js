@@ -11,6 +11,7 @@ class UjianService {
       jumlahSoal: soal.filter((s) => s.ujianId === u.id).length,
       jumlahSoalAktif: soal.filter((s) => s.ujianId === u.id && s.aktif).length,
       jumlahPeserta: peserta.filter((p) => p.ujianId === u.id).length,
+      mode: u.formId ? EXAM_MODE.GFORM : EXAM_MODE.NATIVE,
     }));
   }
 
@@ -18,8 +19,11 @@ class UjianService {
     return this._enrich(this.ujian.where((u) => principal.role === ROLE.ADMIN || u.guruId === principal.id));
   }
 
-  /** Guru membuat/mengubah ujian dan mengatur waktu ujian. */
-  guruSave(guruId, input) {
+  /**
+   * Buat/ubah ujian (admin atau guru). Admin membuat atas nama guru pemilik penugasan.
+   * Guru hanya boleh memakai penugasannya sendiri.
+   */
+  save(principal, input) {
     Validate.object(input, 'Data ujian');
     const judul = Validate.string(input.judul, 'Judul ujian', { max: 150 });
     const deskripsi = Validate.string(input.deskripsi, 'Deskripsi', { max: 1000, required: false });
@@ -36,29 +40,47 @@ class UjianService {
 
     if (input.id) {
       const cur = this.ujian.findById(input.id);
-      AccessPolicy.assertCanManageUjian({ id: guruId, role: ROLE.GURU }, cur);
+      AccessPolicy.assertCanManageUjian(principal, cur);
       const durasi = Validate.int(input.durasiMenit === undefined ? cur.durasiMenit : input.durasiMenit,
         'Waktu ujian (menit)', { min: 1, max: EXAM.MAX_DURATION_MINUTES });
       const patch = Object.assign({ judul, deskripsi, mulai, selesai, durasiMenit: durasi }, flags);
+      // judul/deskripsi/acak tampil di Google Form -> perlu deploy ulang
+      if (cur.formId && (cur.judul !== judul || cur.deskripsi !== deskripsi || cur.acakSoal !== flags.acakSoal)) patch.formStale = true;
       this.ujian.update(cur.id, patch);
       return this._enrich([this.ujian.findById(cur.id)])[0];
     }
 
     const pg = this.penugasan.findById(input.penugasanId);
-    if (!pg || pg.guruId !== guruId) throw Errors.validation('Penugasan (mapel & jenis ujian) tidak valid.');
+    if (!pg || (principal.role === ROLE.GURU && pg.guruId !== principal.id)) {
+      throw Errors.validation('Penugasan (mapel & jenis ujian) tidak valid.');
+    }
     if (!pg.aktif) throw Errors.rule('MAPEL_NONAKTIF', 'Mapel ini sedang nonaktif. Aktifkan dulu untuk menjadwalkan ujian.');
     const durasi = Validate.int(input.durasiMenit === undefined ? pg.durasiMenit : input.durasiMenit,
       'Waktu ujian (menit)', { min: 1, max: EXAM.MAX_DURATION_MINUTES });
     const row = Object.assign({
-      id: Ids.next('ujn'), guruId, penugasanId: pg.id, mapelId: pg.mapelId, jenisUjianId: pg.jenisUjianId,
+      id: Ids.next('ujn'), guruId: pg.guruId, penugasanId: pg.id, mapelId: pg.mapelId, jenisUjianId: pg.jenisUjianId,
       judul, deskripsi, durasiMenit: durasi, mulai, selesai,
-      token: this.newToken(), aktif: false, dibuatPada: Clock.iso(),
+      token: this.newToken(), kodeKeluar: this.newExitCode(), aktif: false, dibuatPada: Clock.iso(), formAccepting: false, formStale: false,
     }, flags);
     this.ujian.insert(row);
     return this._enrich([row])[0];
   }
 
+  /** Kompatibilitas: dipakai rute lama guru.ujian.save. */
+  guruSave(guruId, input) { return this.save({ id: guruId, role: ROLE.GURU }, input); }
+
   newToken() { return CryptoUtil.randomString(EXAM.EXAM_TOKEN_LENGTH, ALPHABET.READABLE); }
+
+  newExitCode() { return CryptoUtil.randomString(EXAM.EXIT_CODE_LENGTH, ALPHABET.READABLE); }
+
+  /** Generate (ulang) kode keluar pengawas (guru pemilik atau admin). */
+  generateKodeKeluar(principal, id) {
+    const u = this.ujian.findById(id);
+    AccessPolicy.assertCanManageUjian(principal, u);
+    const kodeKeluar = this.newExitCode();
+    this.ujian.update(id, { kodeKeluar });
+    return { id, kodeKeluar };
+  }
 
   /** Generate ulang token ujian (guru pemilik atau admin). */
   generateToken(principal, id) {
@@ -69,27 +91,39 @@ class UjianService {
     return { id, token };
   }
 
-  /** Admin mengaktifkan/menonaktifkan ujian. */
-  adminSetAktif(id, aktif) {
+  /** Aktif/nonaktifkan ujian (admin atau guru pemilik). Form Google ikut dibuka/ditutup. */
+  setAktif(principal, id, aktif) {
     const u = this.ujian.findById(id);
-    if (!u) throw Errors.notFound('Ujian');
+    AccessPolicy.assertCanManageUjian(principal, u);
     const on = Validate.bool(aktif);
     if (on && !this.soal.where((s) => s.ujianId === id && s.aktif).length) {
       throw Errors.rule('TIDAK_ADA_SOAL', 'Ujian belum memiliki soal aktif.');
     }
-    this.ujian.update(id, { aktif: on });
-    return { id, aktif: on };
+    const patch = { aktif: on };
+    let formWarning = null;
+    if (u.formId) {
+      try { this.forms.setAccepting(u.formId, on); patch.formAccepting = on; }
+      catch (e) { Log.error('Gagal mengubah status form', e, { ujianId: id }); formWarning = 'Status Google Form gagal diperbarui; coba lagi.'; }
+    }
+    this.ujian.update(id, patch);
+    return { id, aktif: on, formWarning };
   }
 
-  guruRemove(guruId, id) {
+  /** Kompatibilitas: rute lama admin.ujian.setAktif. */
+  adminSetAktif(id, aktif) { return this.setAktif({ id: 'admin', role: ROLE.ADMIN }, id, aktif); }
+
+  remove(principal, id) {
     const u = this.ujian.findById(id);
-    AccessPolicy.assertCanManageUjian({ id: guruId, role: ROLE.GURU }, u);
+    AccessPolicy.assertCanManageUjian(principal, u);
     if (this.sesi.findBy('ujianId', id).length) {
       throw Errors.conflict('Ujian sudah pernah dikerjakan siswa dan tidak dapat dihapus. Nonaktifkan saja.');
     }
+    if (u.formId) { try { this.forms.setAccepting(u.formId, false); } catch (e) { Log.error('Gagal menutup form', e); } }
     this.soal.deleteWhere((s) => s.ujianId === id);
     this.peserta.deleteWhere((p) => p.ujianId === id);
     this.ujian.delete(id);
     return { deleted: true };
   }
+
+  guruRemove(guruId, id) { return this.remove({ id: guruId, role: ROLE.GURU }, id); }
 }

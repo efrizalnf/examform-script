@@ -4,7 +4,7 @@ function ujianListView(box, role) {
   const isGuru = role === 'guru';
   const reload = () => ujianListView(box, role);
   loading(box);
-  Promise.all([api('ujian.list'), isGuru ? api('guru.penugasan.list') : Promise.resolve([])]).then(([list, penugasan]) => {
+  Promise.all([api('ujian.list'), api(isGuru ? 'guru.penugasan.list' : 'admin.penugasan.list')]).then(([list, penugasan]) => {
     const cols = [
       { label: 'Ujian', render: (u) => h('div', null, h('strong', null, u.judul), h('div', { class: 'muted' }, `${u.mapelNama} · ${u.jenisUjianNama}`)) },
       !isGuru && { label: 'Guru', key: 'guruNama' },
@@ -13,30 +13,62 @@ function ujianListView(box, role) {
       { label: 'Soal aktif', render: (u) => `${u.jumlahSoalAktif}/${u.jumlahSoal}` },
       { label: 'Peserta', key: 'jumlahPeserta' },
       { label: 'Token', render: (u) => h('span', { class: 'mono' }, u.token) },
-      { label: 'Status', render: (u) => isGuru ? badge(u.aktif, 'Aktif', 'Draft/nonaktif') : actionBtn(u.aktif ? 'Nonaktifkan' : 'Aktifkan', async () => {
-        await api('admin.ujian.setAktif', { id: u.id, aktif: !u.aktif }); toast(u.aktif ? 'Ujian dinonaktifkan.' : 'Ujian diaktifkan.'); reload();
+      { label: 'Kode keluar', render: (u) => h('span', { class: 'mono' }, u.kodeKeluar || '—') },
+      { label: 'Google Form', render: (u) => formCell(u) },
+      { label: 'Status', render: (u) => actionBtn(u.aktif ? 'Nonaktifkan' : 'Aktifkan', async () => {
+        const r = await api('ujian.setAktif', { id: u.id, aktif: !u.aktif });
+        toast(r.formWarning || (u.aktif ? 'Ujian dinonaktifkan.' : 'Ujian diaktifkan.'), r.formWarning ? 'error' : undefined); reload();
       }, u.aktif ? 'danger' : 'primary') },
       { label: 'Aksi', render: (u) => h('div', { class: 'row' },
         actionBtn('Soal', async () => soalView(box, u, role, reload)),
-        isGuru && actionBtn('Peserta', async () => pesertaView(box, u, reload)),
+        actionBtn('Peserta', async () => pesertaView(box, u, reload)),
+        actionBtn(u.formId ? (u.formStale ? 'Deploy ulang ⚠' : 'Deploy ulang') : 'Deploy ke Form', async () => deployForm(u, reload), u.formStale || !u.formId ? 'primary' : ''),
         actionBtn('Hasil', async () => hasilView(box, u, reload)),
         actionBtn('Token baru', async () => { const r = await api('ujian.generateToken', { id: u.id }); toast('Token baru: ' + r.token); reload(); }),
-        isGuru && actionBtn('Ubah', async () => ujianForm(u, penugasan, reload)),
-        isGuru && actionBtn('Hapus', async () => { if (await confirmBox(`Hapus ujian "${u.judul}" beserta soalnya?`)) { await api('guru.ujian.remove', { id: u.id }); toast('Ujian dihapus.'); reload(); } }, 'danger')) },
+        actionBtn('Kode keluar baru', async () => { const r = await api('ujian.generateKodeKeluar', { id: u.id }); toast('Kode keluar baru: ' + r.kodeKeluar); reload(); }),
+        actionBtn('Ubah', async () => ujianForm(u, penugasan, reload)),
+        actionBtn('Hapus', async () => { if (await confirmBox(`Hapus ujian "${u.judul}" beserta soalnya?`)) { await api('ujian.remove', { id: u.id }); toast('Ujian dihapus.'); reload(); } }, 'danger')) },
     ].filter(Boolean);
     box.replaceChildren(
-      h('div', { class: 'row', style: 'margin-bottom:1rem' }, isGuru && h('button', { class: 'primary', onclick: () => ujianForm(null, penugasan, reload) }, '+ Buat ujian'),
-        h('span', { class: 'muted' }, isGuru ? 'Ujian baru berstatus draft; admin yang mengaktifkannya.' : 'Aktifkan ujian agar muncul di aplikasi siswa.')),
+      h('div', { class: 'row', style: 'margin-bottom:1rem' }, h('button', { class: 'primary', onclick: () => ujianForm(null, penugasan, reload) }, '+ Buat ujian'),
+        h('span', { class: 'muted' }, 'Alur: buat ujian → tambah soal → atur peserta → Deploy ke Form → aktifkan → bagikan token & kode keluar ke pengawas.')),
       h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada ujian.')));
   }).catch(fail);
 }
 
+function formCell(u) {
+  if (!u.formId) return h('span', { class: 'badge off' }, 'Belum deploy');
+  return h('div', null,
+    h('span', { class: 'badge ' + (u.formStale ? 'warn' : 'ok') }, u.formStale ? 'Perlu deploy ulang' : 'Terpasang'),
+    h('div', { class: 'row', style: 'margin-top:.25rem' },
+      h('a', { href: u.formEditUrl, target: '_blank', rel: 'noopener' }, 'Edit'), ' · ',
+      h('a', { href: u.formUrl, target: '_blank', rel: 'noopener' }, 'Buka')));
+}
+
+/** Deploy / deploy ulang soal ujian menjadi Google Form (bisa 10–60 dtk untuk soal banyak). */
+async function deployForm(u, done) {
+  const msg = u.formId
+    ? 'Isi Google Form akan dibangun ulang dari bank soal saat ini (link form tetap sama). Lanjutkan?'
+    : 'Soal aktif akan dibuat menjadi Google Form baru di Google Drive Anda. Proses ini bisa memakan waktu beberapa detik. Lanjutkan?';
+  if (!(await confirmBox(msg, 'Deploy'))) return;
+  toast('Membangun Google Form…');
+  const r = await api('ujian.deployForm', { id: u.id });
+  openModal({
+    title: r.baru ? 'Google Form dibuat' : 'Google Form diperbarui',
+    content: h('div', null,
+      h('p', null, `${r.jumlahItem} item soal dipasang.`),
+      h('p', null, h('a', { href: r.formEditUrl, target: '_blank', rel: 'noopener' }, 'Buka editor Google Form'), ' · ', h('a', { href: r.formUrl, target: '_blank', rel: 'noopener' }, 'Pratinjau formulir')),
+      h('p', { class: 'muted' }, 'Jangan mengubah isi Form secara manual — pemetaan jawaban ke bank soal akan rusak. Ubah soal di sini lalu Deploy ulang.')),
+  });
+  done();
+}
+
 function ujianForm(u, penugasan, done) {
   const aktifP = penugasan.filter((p) => p.aktif || (u && p.id === u.penugasanId));
-  if (!u && !aktifP.length) return toast('Belum ada mapel aktif. Aktifkan di menu "Mapel Saya" atau minta admin menambah penugasan.', 'error');
+  if (!u && !aktifP.length) return toast('Belum ada penugasan aktif. Admin menambah penugasan di menu "Penugasan Guru"; guru mengaktifkan mapel di "Mapel Saya".', 'error');
   const fields = [
     !u && { name: 'penugasanId', label: 'Mapel & jenis ujian', type: 'select', required: true,
-      options: aktifP.map((p) => ({ value: p.id, label: `${p.mapelNama} — ${p.jenisUjianNama} (default ${p.durasiMenit} mnt)` })) },
+      options: aktifP.map((p) => ({ value: p.id, label: `${p.guruNama ? p.guruNama + ' — ' : ''}${p.mapelNama} — ${p.jenisUjianNama} (default ${p.durasiMenit} mnt)` })) },
     { name: 'judul', label: 'Judul ujian', required: true },
     { name: 'deskripsi', label: 'Deskripsi / petunjuk', type: 'textarea' },
     { name: 'durasiMenit', label: 'Waktu ujian (menit)', type: 'number', min: 1, max: 600, required: true },
@@ -50,7 +82,7 @@ function ujianForm(u, penugasan, done) {
     : { durasiMenit: aktifP[0].durasiMenit };
   const modal = formModal({
     title: u ? 'Ubah ujian' : 'Buat ujian', fields, initial: init,
-    onSubmit: async (v) => { await api('guru.ujian.save', Object.assign({ id: u && u.id }, v)); toast('Ujian disimpan.'); done(); },
+    onSubmit: async (v) => { await api('ujian.save', Object.assign({ id: u && u.id }, v)); toast('Ujian disimpan.'); done(); },
   });
   const sel = document.querySelector('select[name=penugasanId]');
   if (sel) sel.addEventListener('change', () => { const p = aktifP.find((x) => x.id === sel.value); if (p) document.querySelector('input[name=durasiMenit]').value = p.durasiMenit; });
@@ -62,7 +94,7 @@ function backBar(title, back) {
 }
 
 function soalView(box, ujian, role, back) {
-  const isGuru = role === 'guru';
+  const isGuru = true; // admin & guru sama-sama dapat mengelola soal
   const reload = () => soalView(box, ujian, role, back);
   loading(box);
   api('soal.list', { ujianId: ujian.id }).then((list) => {
@@ -74,7 +106,7 @@ function soalView(box, ujian, role, back) {
       { label: 'Aktif', render: (q) => actionBtn(q.aktif ? 'Aktif ✓' : 'Nonaktif', async () => { await api('soal.setAktif', { id: q.id, aktif: !q.aktif }); reload(); }, q.aktif ? '' : 'danger') },
       isGuru && { label: 'Aksi', render: (q) => h('div', { class: 'row' },
         actionBtn('Ubah', async () => soalEditor(ujian.id, q, reload)),
-        actionBtn('Hapus', async () => { if (await confirmBox('Hapus soal ini?')) { await api('guru.soal.remove', { id: q.id }); reload(); } }, 'danger')) },
+        actionBtn('Hapus', async () => { if (await confirmBox('Hapus soal ini?')) { await api('soal.remove', { id: q.id }); reload(); } }, 'danger')) },
     ].filter(Boolean);
     box.replaceChildren(backBar(`Soal — ${ujian.judul}`, back),
       isGuru && h('div', { style: 'margin-bottom:1rem' }, h('button', { class: 'primary', onclick: () => soalEditor(ujian.id, null, reload) }, '+ Tambah soal')),
@@ -84,7 +116,7 @@ function soalView(box, ujian, role, back) {
 
 function pesertaView(box, ujian, back) {
   loading(box);
-  api('guru.peserta.get', { ujianId: ujian.id }).then((list) => {
+  api('peserta.get', { ujianId: ujian.id }).then((list) => {
     const chosen = {}; list.forEach((s) => { chosen[s.nis] = s.terpilih; });
     const kelasList = Array.from(new Set(list.map((s) => s.kelas))).sort();
     const kelasSel = h('select', null, h('option', { value: '' }, 'Semua kelas'), kelasList.map((k) => h('option', { value: k }, k)));
@@ -108,7 +140,7 @@ function pesertaView(box, ujian, back) {
           h('button', { onclick: () => mark(true) }, 'Pilih yang tampil'), h('button', { onclick: () => mark(false) }, 'Kosongkan yang tampil'),
           h('span', { class: 'right' }, counter),
           h('button', { class: 'primary', onclick: (e) => busy(e.currentTarget, async () => {
-            const r = await api('guru.peserta.set', { ujianId: ujian.id, nisList: Object.keys(chosen).filter((k) => chosen[k]) });
+            const r = await api('peserta.set', { ujianId: ujian.id, nisList: Object.keys(chosen).filter((k) => chosen[k]) });
             toast(`Tersimpan: ${r.total} peserta (+${r.ditambah} / −${r.dihapus}).`);
           }) }, 'Simpan peserta')),
         holder));
@@ -123,11 +155,21 @@ function hasilView(box, ujian, back) {
     const cols = [
       { label: 'NIS', key: 'nis' }, { label: 'Nama', key: 'nama' }, { label: 'Kelas', key: 'kelas' },
       { label: 'Status', render: (r) => h('span', { class: 'badge ' + (r.status === 'selesai' ? 'ok' : 'warn') }, r.status) },
-      { label: 'Nilai', render: (r) => r.nilai === null ? '-' : h('strong', null, String(r.nilai)) },
-      { label: 'Koreksi', render: (r) => r.perluKoreksi ? h('span', { class: 'badge warn' }, 'Essay belum dinilai') : '' },
-      { label: 'Aksi', render: (r) => actionBtn('Detail', async () => hasilDetail(r.sesiId, reload)) },
+      { label: 'Nilai', render: (r) => r.menungguSinkron ? h('span', { class: 'muted' }, 'menunggu sinkron') : (r.nilai === null ? '-' : h('strong', null, String(r.nilai))) },
+      { label: 'Catatan', render: (r) => h('div', { class: 'row' }, r.perluKoreksi ? h('span', { class: 'badge warn' }, 'Essay belum dinilai') : null, r.terlambat ? h('span', { class: 'badge warn' }, 'Terlambat') : null) },
+      { label: 'Aksi', render: (r) => r.menungguSinkron ? '' : actionBtn('Detail', async () => hasilDetail(r.sesiId, reload)) },
     ];
-    box.replaceChildren(backBar(`Hasil — ${ujian.judul}`, back), h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada siswa yang mengerjakan.')));
+    const syncBtn = ujian.formId ? actionBtn('Sinkronkan hasil dari Google Form', async () => {
+      toast('Mengambil respons dari Google Form…');
+      const r = await api('hasil.syncForm', { ujianId: ujian.id });
+      toast(`Sinkron: ${r.disinkronkan} baru, ${r.dilewati} sudah ada, ${r.belumMengumpulkan} belum mengumpulkan` +
+        (r.terlambat ? `, ${r.terlambat} terlambat` : '') + (r.ganda ? `, ${r.ganda} kiriman ganda diabaikan` : '') +
+        (r.tanpaSesi.length ? `, NIS tanpa sesi: ${r.tanpaSesi.join(', ')}` : '') + '.');
+      reload();
+    }, 'primary') : null;
+    box.replaceChildren(backBar(`Hasil — ${ujian.judul}`, back),
+      syncBtn && h('div', { class: 'row', style: 'margin-bottom:1rem' }, syncBtn, h('span', { class: 'muted' }, 'Nilai muncul setelah sinkron. Boleh dijalankan berulang.')),
+      h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada siswa yang mengerjakan.')));
   }).catch(fail);
 }
 

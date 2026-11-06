@@ -62,7 +62,7 @@ const fs = require('fs');
   await page.selectOption('select[name=role]', 'guru'); await page.fill('input[name=username]', 'sari'); await page.fill('input[name=password]', guruPw);
   await page.click('button[type=submit]'); await page.waitForSelector('td:has-text("Fisika")');
   ok('guru melihat mapel', true);
-  await nav('Ujian, Soal & Peserta'); await page.click('text=+ Buat ujian');
+  await nav('Ujian, Soal & Form'); await page.click('text=+ Buat ujian');
   await page.fill('input[name=judul]', 'UH Gerak'); await page.fill('input[name=durasiMenit]', '40'); await page.click('.modal button.primary');
   await page.waitForSelector('td:has-text("UH Gerak")');
   ok('buat ujian dengan waktu 40 menit', (await page.locator('td:has-text("40 mnt")').count()) === 1);
@@ -90,6 +90,27 @@ const fs = require('fs');
   await page.waitForSelector('.toast:has-text("2 peserta")');
   ok('atur peserta', true);
   await page.screenshot({ path: process.env.SHOT_DIR ? process.env.SHOT_DIR + '/guru-peserta.png' : '/tmp/guru-peserta.png' });
+
+  // deploy ke Google Form
+  await page.click('button:has-text("← Kembali")'); await page.waitForSelector('td:has-text("UH Gerak")');
+  await page.click('td button:text-is("Deploy ke Form")'); await page.click('.modal button.primary:has-text("Deploy")');
+  await page.waitForSelector('.modal:has-text("Google Form dibuat")');
+  ok('deploy ke Google Form dari UI', (await page.locator('.modal').textContent()).includes('item soal dipasang'));
+  await page.click('.modal button:has-text("Tutup")');
+  await page.waitForSelector('td .badge:has-text("Terpasang")');
+  ok('status form "Terpasang"', true);
+  await page.click('td button:text-is("Aktifkan")'); await page.waitForSelector('td button:text-is("Nonaktifkan")');
+  ok('guru dapat mengaktifkan ujian sendiri', true);
+  await page.screenshot({ path: process.env.SHOT_DIR ? process.env.SHOT_DIR + '/guru-ujian-form.png' : '/tmp/guru-ujian-form.png' });
+
+  // admin melihat & dapat mengelola ujian guru
+  await page.click('button:has-text("Keluar")');
+  await page.selectOption('select[name=role]', 'admin'); await page.fill('input[name=username]', 'admin'); await page.fill('input[name=password]', setup.admin.password);
+  await page.click('button[type=submit]'); await page.waitForSelector('aside nav button');
+  await nav('Ujian, Soal & Form'); await page.waitForSelector('td:has-text("UH Gerak")');
+  ok('admin melihat ujian guru + tombol Buat ujian', (await page.locator('text=+ Buat ujian').count()) === 1 && (await page.locator('td:has-text("Fisika")').count()) >= 1);
+  await page.click('td button:text-is("Hasil")'); await page.waitForSelector('text=Sinkronkan hasil dari Google Form');
+  ok('admin membuka hasil + tombol sinkron Google Form', true);
 
   ok('tidak ada error JS di konsol', errors.length === 0);
   if (errors.length) console.log(errors);

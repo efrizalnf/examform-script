@@ -42,6 +42,21 @@ const MenjodohkanType = {
     return { pasangan: { kiri: soal.opsi.kiri, kanan: QuestionHelpers.orderByKeys(
       soal.opsi.kanan.map((r) => ({ key: r.id, teks: r.teks })), layout && layout.kanan).map((r) => ({ id: r.key, teks: r.teks })) } };
   },
+  /** Google Form: satu dropdown per baris kiri; pilihannya adalah seluruh kolom kanan. */
+  toFormItems(soal) {
+    const choices = soal.opsi.kanan.map((r) => r.teks);
+    return soal.opsi.kiri.map((l) => ({
+      sub: l.id, kind: 'dropdown', title: `${soal.teks} — "${l.teks}" berpasangan dengan:`, choices,
+    }));
+  },
+  fromFormAnswers(soal, r) {
+    const out = {};
+    soal.opsi.kiri.forEach((l) => {
+      const o = QuestionHelpers.matchOption(soal.opsi.kanan.map((x) => ({ key: x.id, teks: x.teks })), r[l.id]);
+      if (o) out[l.id] = o.key;
+    });
+    return Object.keys(out).length ? out : null;
+  },
   grade(soal, answer) {
     if (!answer || typeof answer !== 'object') return { ratio: 0, manual: false };
     const ids = Object.keys(soal.kunci);

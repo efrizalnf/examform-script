@@ -12,6 +12,13 @@ const MultiOpsiType = {
   },
   buildLayout(soal, shuffle) { return PilihanGandaType.buildLayout(soal, shuffle); },
   present(soal, layout) { return PilihanGandaType.present(soal, layout); },
+  toFormItems(soal) {
+    return [{ sub: 'main', kind: 'checkbox', title: soal.teks, help: 'Pilih satu atau lebih jawaban.', choices: soal.opsi.map((o) => o.teks) }];
+  },
+  fromFormAnswers(soal, r) {
+    const list = Array.isArray(r.main) ? r.main : (r.main ? [r.main] : []);
+    return list.map((t) => QuestionHelpers.matchOption(soal.opsi, t)).filter(Boolean).map((o) => o.key);
+  },
   grade(soal, answer) {
     if (!Array.isArray(answer)) return { ratio: 0, manual: false };
     const given = answer.map(String).filter((k, i, a) => a.indexOf(k) === i).sort();

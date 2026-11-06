@@ -101,7 +101,7 @@ function soalEditor(ujianId, soal, onSaved) {
       onClick: async () => {
         if (!teks.value.trim()) throw { message: 'Pertanyaan wajib diisi.' };
         const payload = Object.assign({ id: s.id, ujianId, tipe: state.tipe, teks: teks.value.trim(), bobot: Number(bobot.value) }, current.read());
-        await api('guru.soal.save', payload);
+        await api('soal.save', payload);
         toast('Soal disimpan.'); onSaved();
       },
     }],

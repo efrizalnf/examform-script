@@ -35,6 +35,13 @@ const Container = {
       'repo.sesi': repo('sesi'),
       'repo.jawaban': repo('jawaban'),
 
+      // Google Forms
+      formGateway: () => new FormGateway(),
+      formDeployService: () => new FormDeployService({ ujian: g('repo.ujian'), soal: g('repo.soal'), sesi: g('repo.sesi'), forms: g('formGateway') }),
+      formResultService: () => new FormResultService({
+        ujian: g('repo.ujian'), soal: g('repo.soal'), sesi: g('repo.sesi'), forms: g('formGateway'), grading: g('gradingService'),
+      }),
+
       // security
       passwordService: () => new PasswordService(),
       authTokenService: () => new AuthTokenService(),
@@ -55,6 +62,7 @@ const Container = {
       ujianService: () => new UjianService({
         ujian: g('repo.ujian'), penugasan: g('repo.penugasan'), soal: g('repo.soal'), peserta: g('repo.peserta'),
         sesi: g('repo.sesi'), users: g('repo.users'), mapel: g('repo.mapel'), jenis: g('repo.jenisUjian'),
+        forms: g('formGateway'),
       }),
       soalService: () => new SoalService({ soal: g('repo.soal'), ujian: g('repo.ujian'), sesi: g('repo.sesi') }),
       pesertaService: () => new PesertaService({ peserta: g('repo.peserta'), siswa: g('repo.siswa'), ujian: g('repo.ujian') }),
@@ -62,7 +70,8 @@ const Container = {
       studentExamService: () => new StudentExamService({
         ujian: g('repo.ujian'), soal: g('repo.soal'), peserta: g('repo.peserta'), sesi: g('repo.sesi'),
         jawaban: g('repo.jawaban'), penugasan: g('repo.penugasan'), mapel: g('repo.mapel'), jenis: g('repo.jenisUjian'),
-        users: g('repo.users'), grading: g('gradingService'),
+        users: g('repo.users'), grading: g('gradingService'), siswa: g('repo.siswa'), forms: g('formGateway'),
+        throttle: g('loginThrottle'),
       }),
       resultService: () => new ResultService({
         ujian: g('repo.ujian'), sesi: g('repo.sesi'), siswa: g('repo.siswa'), soal: g('repo.soal'),

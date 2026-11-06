@@ -15,7 +15,8 @@ Respons selalu HTTP 200 dengan bentuk:
 ```
 
 > Apps Script membalas POST dengan redirect 302 ke `script.googleusercontent.com`. OkHttp/Retrofit
-> mengikutinya otomatis (`followRedirects` default `true`). Jangan mengirim header `Authorization`; token dikirim di body.
+> mengikutinya otomatis (`followRedirects` default `true`). **Dart/Flutter (`dart:io`, `package:http`) tidak mengikuti redirect untuk POST**:
+> ambil hasilnya dengan GET ke header `Location` (lihat `docs/INTEGRASI-FLUTTER.md`). Jangan mengirim header `Authorization`; token dikirim di body.
 
 Health check: `GET .../exec?action=ping`.
 
@@ -31,16 +32,29 @@ Health check: `GET .../exec?action=ping`.
 `data: { passwordLama, passwordBaru }`
 
 ### `siswa.ujian.list` — dashboard (hanya ujian aktif milik siswa)
-→ 
+→
 ```json
 { "serverTime":"2026-11-06T03:00:00.000Z",
   "ujian":[{ "id":"ujn_ab12cd34","judul":"UH Gerak","mapel":"Fisika","jenisUjian":"Ulangan Harian","guru":"Bu Sari",
-    "durasiMenit":40,"mulai":"","selesai":"","jumlahSoal":10,
+    "durasiMenit":40,"mulai":"","selesai":"","jumlahSoal":10,"mode":"gform|native",
     "status":"belum|berlangsung|selesai","bisaMulai":true,"sesiId":null,"sisaDetik":1234,"nilai":85 }] }
 ```
 `sisaDetik` hanya saat `berlangsung`; `nilai` hanya bila `selesai` dan guru mengizinkan tampil nilai (dan essay sudah dinilai).
 
-### `siswa.ujian.start`
+### `siswa.ujian.start` — dua mode
+
+`mode` pada daftar ujian menentukan bentuk jawaban. **Mode `gform`** (ujian yang sudah di-*Deploy ke Form* oleh guru/admin; dipakai aplikasi `examenha`):
+```json
+{ "mode":"gform",
+  "sesi":{ "id":"ujn_..:00123","ujianId":"ujn_..","judul":"UH Gerak","durasiMenit":40,"status":"berlangsung",
+           "mulai":"ISO","batas":"ISO","sisaDetik":2399,"serverTime":"ISO" },
+  "formUrl":"https://docs.google.com/forms/d/e/.../viewform?usp=pp_url&entry.123=00123&entry.456=Ani" }
+```
+Buka `formUrl` di WebView (NIS & nama sudah terisi). Timer tetap dihitung server (`batas`); saat siswa selesai/waktu habis panggil `siswa.sesi.finish`
+(tanpa `answers`). Nilai **tidak** dikembalikan: ia muncul di `siswa.ujian.list` (`nilai`) setelah guru/admin menjalankan `hasil.syncForm`.
+Pada mode ini `siswa.jawaban.save` mengembalikan error `MODE_GFORM`.
+
+**Mode `native`** (belum di-deploy; soal dirender aplikasi):
 `data: { ujianId, token }` — `token` ujian wajib saat pertama kali; bila sesi sudah berjalan, panggilan ulang
 (`token` boleh kosong) **melanjutkan** sesi (mis. aplikasi ditutup/crash). Timer tidak berhenti.
 →
@@ -51,6 +65,12 @@ Health check: `GET .../exec?action=ping`.
   "jawaban":{ "<soalId>": <jawaban tersimpan> } }
 ```
 Hitung mundur di aplikasi dari `sisaDetik` (bukan jam perangkat); sinkronkan ulang dari `sisaDetik` pada tiap respons simpan.
+
+### `siswa.sesi.exit` — verifikasi kode keluar pengawas
+`data: { sesiId, kode }` → `{ ok: true }`. Dipanggil saat siswa/pengawas memasukkan kode untuk **keluar sementara** dari ujian.
+Kode dibuat guru/admin **per ujian** (`ujian.generateKodeKeluar`), hanya dibandingkan di server (tidak pernah dikirim ke aplikasi),
+tidak peka huruf besar/kecil, dan dibatasi 5 percobaan salah per 5 menit per siswa. Keluar sementara **tidak** menghentikan timer server;
+siswa dapat *Lanjutkan* dari dashboard. Error: `KODE_KELUAR_SALAH`, `KODE_KELUAR_BELUM_ADA`, `TOO_MANY_ATTEMPTS`, `NOT_FOUND` (bukan sesi milik siswa).
 
 ### `siswa.sesi.get`
 `data: { sesiId }` → payload yang sama dengan `start` (atau hasil akhir bila sudah selesai).
@@ -92,6 +112,11 @@ Penilaian: `pg`/`multi` (benar bila himpunan persis sama)/`isian` (tidak peka hu
 | `BELUM_DIMULAI` / `SUDAH_DITUTUP` | di luar jadwal | tampilkan jadwal |
 | `SUDAH_SELESAI` | sesi sudah selesai | ke layar hasil |
 | `WAKTU_HABIS` | batas waktu terlewati | ke layar selesai |
+| `FORM_USANG` | soal diubah setelah deploy; guru perlu *Deploy ulang* | tampilkan pesan |
+| `FORM_DITUTUP` | form sedang tidak menerima jawaban (ujian dinonaktifkan/jadwal lewat) | tampilkan pesan |
+| `KODE_KELUAR_SALAH` | kode keluar pengawas salah | tampilkan pesan, ujian lanjut |
+| `KODE_KELUAR_BELUM_ADA` | guru/admin belum membuat kode keluar | minta pengawas membuat kode |
+| `MODE_GFORM` | memakai API jawaban pada ujian ber-Form | gunakan WebView |
 | `BUSY` | permintaan ganda/server sibuk | ulangi setelah ±1 dtk |
 | `VALIDATION_ERROR` | input tidak valid | – |
 | `INTERNAL_ERROR` | kesalahan server | coba lagi |
@@ -125,6 +150,14 @@ Praktik baik di klien: simpan jawaban ke penyimpanan lokal lalu kirim (antrian +
 dan *screen pinning* untuk mode ujian; blokir tombol "mulai" saat `bisaMulai=false`.
 
 ## Endpoint admin & guru (dipakai Web UI)
+
+Rute bersama admin **dan** guru (guru dibatasi ke ujiannya sendiri; admin atas semua ujian, membuat ujian atas nama guru pemilik penugasan):
+`ujian.list|save|remove|setAktif|generateToken|generateKodeKeluar|deployForm`, `soal.list|save|remove|setAktif`, `peserta.get|set`, `hasil.list|detail|nilaiEssay|syncForm`.
+
+- `ujian.deployForm {id}` → `{formId, formUrl, formEditUrl, jumlahItem, baru}`. Membuat Google Form dari soal aktif (deploy pertama) atau membangun ulang isinya (link tetap). Ditolak bila sudah ada siswa yang mengerjakan.
+- `hasil.syncForm {ujianId}` → `{disinkronkan, dilewati, tanpaSesi[], ganda, tanpaNis, terlambat, perluKoreksi, belumMengumpulkan}`. Inkremental dan aman diulang.
+
+Rute lama tetap tersedia: `guru.ujian.*`, `guru.soal.*`, `guru.peserta.*`, `admin.ujian.setAktif`.
 
 Format sama; lihat `src/api/controllers/*` — daftar aksi: `admin.guru.*`, `admin.siswa.*` (`import`, `generatePasswords`),
 `admin.mapel.*`, `admin.jenisUjian.*`, `admin.penugasan.*`, `admin.ujian.setAktif`, `ujian.list`, `ujian.generateToken`,

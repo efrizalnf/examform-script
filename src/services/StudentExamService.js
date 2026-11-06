@@ -32,11 +32,12 @@ class StudentExamService {
         id: u.id, judul: u.judul, deskripsi: u.deskripsi,
         mapel: mapel[u.mapelId] || '-', jenisUjian: jenis[u.jenisUjianId] || '-', guru: guru[u.guruId] || '-',
         durasiMenit: u.durasiMenit, mulai: u.mulai, selesai: u.selesai, jumlahSoal,
+        mode: u.formId ? EXAM_MODE.GFORM : EXAM_MODE.NATIVE,
         status, sesiId: s ? s.id : null,
-        bisaMulai: status === STUDENT_EXAM_STATUS.BERLANGSUNG || (status === STUDENT_EXAM_STATUS.BELUM && !closed && (!u.mulai || now >= new Date(u.mulai))),
+        bisaMulai: !u.formStale && (status === STUDENT_EXAM_STATUS.BERLANGSUNG || (status === STUDENT_EXAM_STATUS.BELUM && !closed && (!u.mulai || now >= new Date(u.mulai)))),
       };
       if (status === STUDENT_EXAM_STATUS.BERLANGSUNG) item.sisaDetik = this._remaining(s, now);
-      if (status === STUDENT_EXAM_STATUS.SELESAI && u.tampilNilai && !s.perluKoreksi) item.nilai = s.nilai;
+      if (status === STUDENT_EXAM_STATUS.SELESAI && u.tampilNilai && !s.perluKoreksi && s.skorMaksimum > 0) item.nilai = s.nilai;
       out.push(item);
     });
     out.sort((a, b) => String(a.mulai || '').localeCompare(String(b.mulai || '')));
@@ -48,6 +49,7 @@ class StudentExamService {
     const pg = this.penugasan.findById(u.penugasanId);
     if (!pg || !pg.aktif) throw Errors.rule('UJIAN_TIDAK_TERSEDIA', 'Ujian tidak tersedia.');
     if (!this.peserta.findById(`${u.id}:${nis}`)) throw Errors.rule('BUKAN_PESERTA', 'Anda tidak terdaftar sebagai peserta ujian ini.');
+    if (u.formStale) throw Errors.rule('FORM_USANG', 'Ujian sedang diperbarui oleh guru. Hubungi pengawas.');
   }
 
   /** Mulai (atau lanjutkan) ujian. Token wajib untuk memulai pertama kali. */
@@ -75,6 +77,7 @@ class StudentExamService {
 
       const bank = this.soal.findBy('ujianId', u.id).filter((q) => q.aktif).sort((a, b) => a.urutan - b.urutan);
       if (!bank.length) throw Errors.rule('TIDAK_ADA_SOAL', 'Ujian belum memiliki soal.');
+      if (u.formId && !u.formAccepting) throw Errors.rule('FORM_DITUTUP', 'Formulir ujian sedang ditutup.');
       const ids = bank.map((q) => q.id);
       const layouts = {};
       bank.forEach((q) => { layouts[q.id] = QuestionTypeRegistry.get(q.tipe).buildLayout(q, u.acakOpsi); });
@@ -84,7 +87,7 @@ class StudentExamService {
       s = {
         id: sesiId, ujianId: u.id, nis, mulai: Clock.iso(now), batas: Clock.iso(batas), selesai: '',
         status: SESSION_STATUS.BERLANGSUNG, layout: { soal: u.acakSoal ? Shuffle.array(ids) : ids, layouts },
-        skorPerolehan: 0, skorMaksimum: bank.reduce((m, q) => m + q.bobot, 0), nilai: 0, perluKoreksi: false,
+        skorPerolehan: 0, skorMaksimum: u.formId ? 0 : bank.reduce((m, q) => m + q.bobot, 0), nilai: 0, perluKoreksi: false,
       };
       this.sesi.insert(s);
       return this._payload(s, u, now);
@@ -95,6 +98,28 @@ class StudentExamService {
     const s = this.sesi.findById(sesiId);
     if (!s || s.nis !== nis) throw Errors.notFound('Sesi ujian');
     return s;
+  }
+
+  /**
+   * Verifikasi kode keluar pengawas untuk keluar sementara dari ujian.
+   * Kode dibuat guru/admin per ujian dan hanya dibandingkan di server
+   * (tidak pernah dikirim ke aplikasi siswa). Dibatasi percobaan salah.
+   */
+  verifyExitCode(nis, input) {
+    Validate.object(input, 'Data');
+    const s = this._ownedSesi(nis, input.sesiId);
+    const key = `exit:${nis}`;
+    this.throttle.assertAllowed(key, 'Terlalu banyak kode keluar yang salah. Coba lagi beberapa menit lagi.');
+    const u = this.ujian.findById(s.ujianId);
+    const expected = String((u && u.kodeKeluar) || '').trim().toUpperCase();
+    if (!expected) throw Errors.rule('KODE_KELUAR_BELUM_ADA', 'Kode keluar belum dibuat oleh guru/admin.');
+    const given = String(input.kode === undefined || input.kode === null ? '' : input.kode).trim().toUpperCase();
+    if (!CryptoUtil.safeEqual(given, expected)) {
+      this.throttle.recordFailure(key);
+      throw Errors.rule('KODE_KELUAR_SALAH', 'Kode keluar ujian salah. Ujian tetap berjalan.');
+    }
+    this.throttle.reset(key);
+    return { ok: true };
   }
 
   /** Ambil ulang state sesi (mis. setelah aplikasi ditutup). */
@@ -111,6 +136,7 @@ class StudentExamService {
     Validate.object(input, 'Data');
     const now = Clock.now();
     const s = this._ownedSesi(nis, input.sesiId);
+    if (this._isForm(s)) throw Errors.rule('MODE_GFORM', 'Ujian ini dikerjakan di Google Form; jawaban tidak dikirim lewat API.');
     if (s.status === SESSION_STATUS.SELESAI) throw Errors.rule('SUDAH_SELESAI', 'Ujian sudah selesai.');
     if (now.getTime() > new Date(s.batas).getTime() + EXAM.GRACE_SECONDS * 1000) {
       this._finalize(s);
@@ -140,7 +166,7 @@ class StudentExamService {
     const u = this.ujian.findById(s.ujianId);
     if (s.status === SESSION_STATUS.BERLANGSUNG) {
       const inTime = now.getTime() <= new Date(s.batas).getTime() + EXAM.GRACE_SECONDS * 1000;
-      if (inTime && Array.isArray(input.answers) && input.answers.length) this._storeAnswers(s, input.answers, now);
+      if (inTime && !this._isForm(s) && Array.isArray(input.answers) && input.answers.length) this._storeAnswers(s, input.answers, now);
       s = this._finalize(s);
     }
     return this._result(s, u);
@@ -150,7 +176,7 @@ class StudentExamService {
     if (s.status === SESSION_STATUS.SELESAI) return s;
     const end = new Date(Math.min(Clock.nowMs(), new Date(s.batas).getTime()));
     this.sesi.update(s.id, { status: SESSION_STATUS.SELESAI, selesai: Clock.iso(end) });
-    this.grading.gradeSession(Object.assign({}, s, { status: SESSION_STATUS.SELESAI }));
+    if (!this._isForm(s)) this.grading.gradeSession(Object.assign({}, s, { status: SESSION_STATUS.SELESAI }));
     return this.sesi.findById(s.id);
   }
 
@@ -165,7 +191,26 @@ class StudentExamService {
     return n;
   }
 
+  _isForm(s) { const u = this.ujian.findById(s.ujianId); return !!(u && u.formId); }
+
+  _sesiView(s, u, now) {
+    return {
+      id: s.id, ujianId: s.ujianId, judul: u.judul, durasiMenit: u.durasiMenit, status: s.status,
+      mulai: s.mulai, batas: s.batas, sisaDetik: this._remaining(s, now), serverTime: Clock.iso(now),
+    };
+  }
+
+  /** Mode Google Form: kirim link form (NIS & nama terisi otomatis), bukan soal. */
+  _formPayload(s, u, now) {
+    const siswa = this.siswa.findById(s.nis) || {};
+    const formUrl = this.forms.prefilledUrl({
+      formId: u.formId, nisItemId: u.formNisItemId, namaItemId: u.formNamaItemId, nis: s.nis, nama: siswa.nama || s.nis,
+    });
+    return { mode: EXAM_MODE.GFORM, sesi: this._sesiView(s, u, now), formUrl };
+  }
+
   _payload(s, u, now) {
+    if (u.formId) return this._formPayload(s, u, now);
     const bank = {}; this.soal.findBy('ujianId', s.ujianId).forEach((q) => { bank[q.id] = q; });
     const jawaban = {}; this.jawaban.findBy('sesiId', s.id).forEach((j) => { jawaban[j.soalId] = j.jawaban; });
     const soal = s.layout.soal.map((id, i) => {
@@ -173,17 +218,11 @@ class StudentExamService {
       const view = QuestionTypeRegistry.get(q.tipe).present(q, s.layout.layouts[id]);
       return Object.assign({ id, nomor: i + 1, tipe: q.tipe, teks: q.teks, bobot: q.bobot }, view);
     }).filter(Boolean);
-    return {
-      sesi: {
-        id: s.id, ujianId: s.ujianId, judul: u.judul, durasiMenit: u.durasiMenit, status: s.status,
-        mulai: s.mulai, batas: s.batas, sisaDetik: this._remaining(s, now), serverTime: Clock.iso(now),
-      },
-      soal, jawaban,
-    };
+    return { mode: EXAM_MODE.NATIVE, sesi: this._sesiView(s, u, now), soal, jawaban };
   }
 
   _result(s, u) {
-    const showScore = u && u.tampilNilai && !s.perluKoreksi;
+    const showScore = u && u.tampilNilai && !s.perluKoreksi && s.skorMaksimum > 0;
     return {
       sesi: { id: s.id, ujianId: s.ujianId, status: SESSION_STATUS.SELESAI, selesai: s.selesai, judul: u && u.judul },
       hasil: showScore ? { nilai: s.nilai, skorPerolehan: s.skorPerolehan, skorMaksimum: s.skorMaksimum } : null,

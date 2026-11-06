@@ -1,10 +1,10 @@
 /** Pembatas percobaan login (per akun) memakai CacheService. */
 class LoginThrottle {
   _key(k) { return `login_fail:${k}`; }
-  assertAllowed(k) {
+  assertAllowed(k, message) {
     const n = Number(CacheService.getScriptCache().get(this._key(k)) || 0);
     if (n >= AUTH.MAX_FAILED_LOGIN) {
-      throw Errors.rule('TOO_MANY_ATTEMPTS', 'Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.');
+      throw Errors.rule('TOO_MANY_ATTEMPTS', message || 'Terlalu banyak percobaan login. Coba lagi beberapa menit lagi.');
     }
   }
   recordFailure(k) {

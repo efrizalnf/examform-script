@@ -48,10 +48,17 @@ const Schema = {
       { name: 'durasiMenit', type: 'number' },
       { name: 'mulai' }, { name: 'selesai' }, // jendela jadwal (ISO, opsional)
       { name: 'token' },
+      { name: 'kodeKeluar' }, // kode keluar pengawas (dibuat guru/admin, diverifikasi server)
       { name: 'aktif', type: 'bool' }, // diatur admin
       { name: 'acakSoal', type: 'bool' }, { name: 'acakOpsi', type: 'bool' },
       { name: 'tampilNilai', type: 'bool' },
       { name: 'dibuatPada' },
+      // --- Google Form (mode gform) ---
+      { name: 'formId' }, { name: 'formUrl' }, { name: 'formEditUrl' },
+      { name: 'formNisItemId' }, { name: 'formNamaItemId' },
+      { name: 'formDeployedAt' },
+      { name: 'formAccepting', type: 'bool' }, // form menerima jawaban
+      { name: 'formStale', type: 'bool' },     // soal berubah setelah deploy -> perlu deploy ulang
     ],
   },
   soal: {
@@ -61,6 +68,7 @@ const Schema = {
       { name: 'opsi', type: 'json' }, { name: 'kunci', type: 'json' },
       { name: 'bobot', type: 'number' }, { name: 'urutan', type: 'number' },
       { name: 'aktif', type: 'bool' }, { name: 'dibuatPada' },
+      { name: 'formItems', type: 'json' }, // {sub: itemIdForm} hasil deploy
     ],
   },
   peserta: {
@@ -77,6 +85,9 @@ const Schema = {
       { name: 'skorPerolehan', type: 'number' }, { name: 'skorMaksimum', type: 'number' },
       { name: 'nilai', type: 'number' },
       { name: 'perluKoreksi', type: 'bool' },
+      // --- mode gform: jawaban ditarik dari respons Google Form ---
+      { name: 'jawabanForm', type: 'json' }, { name: 'formResponseId' },
+      { name: 'terlambat', type: 'bool' },
     ],
   },
   jawaban: {

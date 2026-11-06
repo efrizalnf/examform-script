@@ -6,7 +6,7 @@ Views.admin.push(
   { id: 'siswa', label: 'Siswa', render: adminSiswaView },
   { id: 'mapel', label: 'Mata Pelajaran', render: (box) => masterView(box, 'mapel', 'Mata pelajaran') },
   { id: 'jenis', label: 'Jenis Ujian', render: (box) => masterView(box, 'jenisUjian', 'Jenis ujian') },
-  { id: 'ujian', label: 'Ujian & Soal', render: (box) => ujianListView(box, 'admin') }
+  { id: 'ujian', label: 'Ujian, Soal & Form', render: (box) => ujianListView(box, 'admin') }
 );
 
 function adminGuruView(box) {

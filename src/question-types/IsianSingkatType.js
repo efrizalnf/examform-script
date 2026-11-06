@@ -10,6 +10,8 @@ const IsianSingkatType = {
   },
   buildLayout() { return {}; },
   present() { return {}; },
+  toFormItems(soal) { return [{ sub: 'main', kind: 'text', title: soal.teks }]; },
+  fromFormAnswers(soal, r) { return r.main === undefined || r.main === null ? null : String(r.main); },
   grade(soal, answer) {
     const a = QuestionHelpers.normalizeText(answer);
     const ok = a !== '' && soal.kunci.some((k) => QuestionHelpers.normalizeText(k) === a);

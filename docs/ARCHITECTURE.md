@@ -18,9 +18,23 @@ Web UI (HtmlService)   Android (HTTP POST)
 - **Schema** (`infra/Schema.js`) mendefinisikan semua sheet. Tambah kolom di akhir → header ditambahkan otomatis saat sheet dibuka.
 - **Tanpa urutan muat**: file hanya mendefinisikan fungsi/kelas/literal; dependensi diselesaikan saat dipanggil, jadi urutan file Apps Script tidak berpengaruh.
 
+## Google Form (mode gform)
+
+```
+soal (bank, tipe apa pun) ──FormPlanService.build──► rencana item ──FormGateway.deploy──► Google Form
+                                                                      (NIS, Nama, lalu soal)
+respons Form ──FormGateway.readResponses──► FormPlanService.readAnswers ──► jawaban CBT ──GradingService.compute──► Sesi.nilai
+```
+- **Tipe soal menyumbang pemetaannya sendiri** (`toFormItems` / `fromFormAnswers`), jadi menambah tipe baru otomatis mendukung Form.
+- `FormPlanService` murni (tanpa FormApp) → mudah diuji; `FormGateway` satu-satunya yang memanggil `FormApp` (dapat diganti Forms REST API).
+- Form **bukan mode kuis**: tidak ada kunci/poin di Form. Nilai dihitung server dari bank soal → bobot desimal, isian multi-kunci, dan jodoh parsial tetap konsisten dengan mode native.
+- `Soal.formItems` menyimpan `{sub: itemIdForm}`; `Ujian.formStale` menandai bank soal ≠ isi Form.
+- `FormResultService.sync` inkremental (lewati `formResponseId` yang sama), satu respons per NIS (paling awal), penanda `terlambat`, satu `updateMany` untuk semua sesi.
+- Sesi mode gform dibuat saat `start` (timer & token tetap di server); status `selesai` diset klien (`finish`) atau trigger saat batas lewat.
+
 ## Cara menambah…
 
-**Tipe soal baru** (mis. benar/salah): buat `question-types/BenarSalahType.js` dengan `{type, manual, normalize, buildLayout, present, grade}`, tambahkan ke `QuestionTypeRegistry.all()`. Router, grading, UI siswa API otomatis ikut. (UI guru: tambah builder di `web/js/SoalEditor.html`.)
+**Tipe soal baru** (mis. benar/salah): buat `question-types/BenarSalahType.js` dengan `{type, manual, normalize, buildLayout, present, grade, toFormItems, fromFormAnswers}`, tambahkan ke `QuestionTypeRegistry.all()`. Router, grading, UI siswa API otomatis ikut. (UI guru: tambah builder di `web/js/SoalEditor.html`.)
 
 **Endpoint baru**: tambah metode di service → tambah satu entri `{roles, handle}` di controller yang cocok.
 

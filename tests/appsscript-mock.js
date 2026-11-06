@@ -65,12 +65,64 @@ class MockSpreadsheet {
   deleteSheet(s) { this.sheets = this.sheets.filter((x) => x !== s); }
 }
 
+
+/** Mock FormApp: cukup untuk menguji deploy, prefill, dan pembacaan respons. */
+class MockItem {
+  constructor(form, kind) { this.form = form; this.kind = kind; this.id = ++form.counter + 1000; this.title = ''; this.choices = []; this.required = false; this.help = ''; }
+  setTitle(t) { this.title = t; return this; }
+  setHelpText(t) { this.help = t; return this; }
+  setRequired(b) { this.required = b; return this; }
+  setChoices(c) { this.choices = c.map((x) => x.getValue()); return this; }
+  createChoice(v) { return { getValue: () => v }; }
+  getId() { return this.id; }
+  asTextItem() { return this; }
+  createResponse(v) { return { item: this, value: v }; }
+}
+class MockForm {
+  constructor(id, title) { Object.assign(this, { id, title, items: [], responses: [], accepting: true, settings: {}, counter: 0 }); }
+  getId() { return this.id; }
+  getPublishedUrl() { return `https://docs.google.com/forms/d/e/${this.id}/viewform`; }
+  getEditUrl() { return `https://docs.google.com/forms/d/${this.id}/edit`; }
+  setTitle(t) { this.title = t; return this; }
+  setAcceptingResponses(b) { this.accepting = b; return this; }
+  isAcceptingResponses() { return this.accepting; }
+  getItems() { return this.items.slice(); }
+  deleteItem(i) { this.items.splice(i, 1); }
+  getItemById(id) { return this.items.find((x) => x.id === id); }
+  _add(kind) { const it = new MockItem(this, kind); this.items.push(it); return it; }
+  addTextItem() { return this._add('text'); } addParagraphTextItem() { return this._add('paragraph'); }
+  addMultipleChoiceItem() { return this._add('choice'); } addCheckboxItem() { return this._add('checkbox'); }
+  addListItem() { return this._add('dropdown'); } addPageBreakItem() { return this._add('pagebreak'); }
+  createResponse() {
+    const r = { items: [], withItemResponse(x) { this.items.push(x); return this; },
+      toPrefilledUrl: () => 'https://docs.google.com/forms/d/e/' + this.id + '/viewform?usp=pp_url' + r.items.map((x) => '&entry.' + x.item.id + '=' + encodeURIComponent(x.value)).join('') };
+    return r;
+  }
+  getResponses() {
+    return this.responses.map((r) => ({
+      getId: () => r.id, getTimestamp: () => new Date(r.ts),
+      getItemResponses: () => Object.keys(r.answers).map((id) => ({ getItem: () => ({ getId: () => Number(id) }), getResponse: () => r.answers[id] })),
+    }));
+  }
+  /** helper uji */
+  __addResponse(ts, answers) { this.responses.push({ id: 'resp_' + (this.responses.length + 1), ts, answers }); }
+}
+['setDescription', 'setConfirmationMessage', 'setShowLinkToRespondAgain', 'setAllowResponseEdits', 'setCollectEmail', 'setLimitOneResponsePerUser',
+  'setProgressBar', 'setPublishingSummary', 'setShuffleQuestions', 'setRequireLogin'].forEach((fn) => {
+  MockForm.prototype[fn] = function (v) { this.settings[fn] = v; return this; };
+});
+
 function createGlobals() {
+  const forms = {}; let formSeq = 0;
   const ss = new MockSpreadsheet();
   const props = {}; const cacheStore = {}; let triggers = [];
   return {
-    ss,
+    ss, forms,
     globals: {
+      FormApp: {
+        create: (title) => { const f = new MockForm('form' + (++formSeq), title); forms[f.id] = f; return f; },
+        openById: (id) => { if (!forms[id]) throw new Error('Form tidak ada'); return forms[id]; },
+      },
       console,
       Utilities: {
         getUuid: () => crypto.randomUUID(),

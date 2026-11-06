@@ -8,5 +8,7 @@ const EssayType = {
   },
   buildLayout() { return {}; },
   present() { return {}; },
+  toFormItems(soal) { return [{ sub: 'main', kind: 'paragraph', title: soal.teks }]; },
+  fromFormAnswers(soal, r) { return r.main === undefined || r.main === null ? null : String(r.main); },
   grade() { return { ratio: 0, manual: true }; },
 };

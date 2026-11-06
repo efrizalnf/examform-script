@@ -16,6 +16,14 @@ const PilihanGandaType = {
   present(soal, layout) {
     return { opsi: QuestionHelpers.orderByKeys(soal.opsi, layout && layout.opsi) };
   },
+  /** Google Form: 1 item pilihan ganda. Kunci TIDAK dikirim ke Form (penilaian dilakukan di server). */
+  toFormItems(soal) {
+    return [{ sub: 'main', kind: 'choice', title: soal.teks, choices: soal.opsi.map((o) => o.teks) }];
+  },
+  fromFormAnswers(soal, r) {
+    const o = QuestionHelpers.matchOption(soal.opsi, r.main);
+    return o ? o.key : null;
+  },
   grade(soal, answer) {
     return { ratio: answer !== undefined && answer !== null && String(answer) === String(soal.kunci) ? 1 : 0, manual: false };
   },
