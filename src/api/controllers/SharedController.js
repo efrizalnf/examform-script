@@ -4,13 +4,19 @@ const SharedController = {
     const AG = [ROLE.ADMIN, ROLE.GURU];
     const c = (n) => Container.get(n);
     return {
-      'meta.options': { roles: AG, handle: () => ({ tipeSoal: QuestionTypeRegistry.types() }) },
+      'meta.options': { roles: AG, handle: () => ({ tipeSoal: QuestionTypeRegistry.types(), jenjang: Jenjang.LIST }) },
       'ujian.list': { roles: AG, handle: (x) => c('ujianService').list(x.principal) },
       // admin & guru: kelola ujian, soal, peserta (data dibatasi kepemilikan lewat AccessPolicy)
       'ujian.save': { roles: AG, handle: (x, d) => c('ujianService').save(x.principal, d) },
       'ujian.remove': { roles: AG, handle: (x, d) => c('ujianService').remove(x.principal, d.id) },
       'ujian.setAktif': { roles: AG, handle: (x, d) => c('ujianService').setAktif(x.principal, d.id, d.aktif) },
       'ujian.deployForm': { roles: AG, handle: (x, d) => c('formDeployService').deploy(x.principal, d.id) },
+      'ujian.syncEditors': { roles: AG, handle: (x, d) => c('formDeployService').syncEditors(x.principal, d.id) },
+      'bank.list': { roles: AG, handle: (x, d) => c('bankSoalService').list(x.principal, d || {}) },
+      'bank.saveFromUjian': { roles: AG, handle: (x, d) => c('bankSoalService').saveFromUjian(x.principal, d) },
+      'bank.import': { roles: AG, handle: (x, d) => c('bankSoalService').importToUjian(x.principal, d) },
+      'bank.remove': { roles: AG, handle: (x, d) => c('bankSoalService').remove(x.principal, d.id) },
+      'dashboard.stats': { roles: AG, handle: (x) => c('dashboardService').stats(x.principal) },
       'soal.save': { roles: AG, handle: (x, d) => c('soalService').save(x.principal, d) },
       'soal.remove': { roles: AG, handle: (x, d) => c('soalService').remove(x.principal, d.id) },
       'peserta.get': { roles: AG, handle: (x, d) => c('pesertaService').get(x.principal, d.ujianId) },

@@ -4,7 +4,7 @@
  */
 const APP = Object.freeze({
   NAME: 'ExamForm CBT',
-  VERSION: '1.3.0',
+  VERSION: '1.4.1',
   TIMEZONE: 'Asia/Jakarta',
 });
 
@@ -69,3 +69,16 @@ const ALPHABET = Object.freeze({
   READABLE: 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789',
   PASSWORD: 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789',
 });
+
+/** Jenjang pendidikan baku. Nilai tersimpan selalu salah satu dari daftar ini. */
+const Jenjang = {
+  LIST: ['SD/MI', 'SMP/MTs', 'SMA/MA'],
+  /** Terima variasi penulisan (SD, mi, smp, MTS, sma, ma, SMK/MAK…) -> nilai baku; tak dikenal -> null. */
+  normalize(v) {
+    const t = String(v === undefined || v === null ? '' : v).toUpperCase().replace(/[^A-Z]/g, '');
+    if (['SD', 'MI', 'SDMI', 'MISD'].indexOf(t) >= 0) return 'SD/MI';
+    if (['SMP', 'MTS', 'SMPMTS', 'MTSSMP'].indexOf(t) >= 0) return 'SMP/MTs';
+    if (['SMA', 'MA', 'SMK', 'MAK', 'SMAMA', 'MASMA'].indexOf(t) >= 0) return 'SMA/MA';
+    return null;
+  },
+};

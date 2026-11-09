@@ -5,6 +5,26 @@ Repo: https://github.com/efrizalnf/examform-script
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-11-09
+### Diperbaiki
+- **Refresh halaman tidak lagi kembali ke login**: pada Web App Apps Script yang berjalan di iframe ber-sandbox, `sessionStorage` tidak bertahan. Sesi kini juga disimpan di hash URL halaman induk (`google.script.history.replace`) dan dibaca lagi saat dibuka (`google.script.url.getLocation`); hash tidak dikirim ke server, token tetap berlaku maksimal 8 jam dan dihapus saat *Keluar*. Smoke test mensimulasikan hilangnya sessionStorage.
+- **Filter hasil ujian per kelas kini selalu tampil** dan mencakup seluruh peserta: peserta yang belum membuka ujian ikut ditampilkan dengan status *belum mulai* (sebelumnya hanya siswa yang sudah punya sesi, sehingga filter kosong/tidak terlihat).
+### Ditambahkan
+- **Jenjang baku** SD/MI, SMP/MTs, SMA/MA (`Jenjang` di Constants): siswa wajib memakai salah satunya (input seperti SD, mi, smp, MTS, sma, ma, SMK otomatis dibakukan; selain itu ditolak). Form siswa memakai pilihan jenjang, daftar siswa/peserta/hasil punya filter jenjang, impor massal ikut dibakukan, `meta.options` mengembalikan daftar jenjang. Data lama (mis. "SMA") tampil sebagai SMA/MA dan terbakukan saat disimpan ulang.
+- Popup **Email** khusus di menu Guru (klik email atau tombol *Email*) untuk mengubah email guru tanpa membuka form lengkap; email tetap ada juga di form Ubah.
+
+## [1.4.0] - 2026-11-08
+### Ditambahkan
+- **Filter hasil ujian per kelas** (menu Hasil): pilihan kelas beserta jumlah siswa, ringkasan Siswa/Selesai/Rata-rata/Tertinggi/Terendah ikut menyesuaikan filter.
+- **Bank soal**: `BankSoalService` + tabel `BankSoal` (dibuat otomatis lewat `setup`). Rute `bank.list` (filter mapel/tipe/cari), `bank.saveFromUjian` (semua soal atau sebagian; duplikat dilewati lewat sidik jari tipe+teks), `bank.import` (salin soal bank ke ujian lain; diblokir bila ujian sudah dikerjakan; Form perlu deploy ulang) dan `bank.remove`. Guru hanya melihat bank miliknya, admin melihat semua. UI: menu **Bank Soal**, tombol *Simpan semua ke bank soal*, *Ke bank* per soal, dan *Ambil dari bank soal* di halaman Soal.
+- **Hak edit Google Form hanya untuk email guru terdaftar**: kolom baru `Users.email` (diisi admin di menu Guru; divalidasi, huruf kecil, unik). Saat Deploy, `FormGateway.syncEditors` menjadikan email guru pemilik ujian sebagai editor Form dan **mencabut editor lain**. Rute `ujian.syncEditors` (tombol *Atur akses edit*) menerapkan ulang setelah email diubah. Hasil dilaporkan jelas: `ok` / `tanpa_email` / `gagal` (mis. bukan akun Google) tanpa menggagalkan deploy. UI ujian menampilkan tautan **Edit Form** + email editor.
+- **Beranda** untuk admin & guru (`dashboard.stats`): kartu ringkasan (siswa, guru, ujian, sedang mengerjakan, soal, status Form) dan daftar ujian terbaru.
+### Diubah
+- **Tampilan lebih profesional**: sidebar gelap bergradasi dengan ikon & kartu pengguna, banner sapaan, kartu statistik, tabel lebih lega, tombol/badge/field bergaya baru, mode gelap dan responsif ponsel; daftar ujian dipadatkan (kolom Jadwal, Soal/Peserta, Token/Kode keluar digabung).
+- Tes: `tests/v14.js` (27 uji) ditambahkan ke `npm test`; UI smoke test diperluas (Beranda, bank soal, Edit Form, filter kelas).
+### Catatan peningkatan
+- Jalankan `setup` sekali (menambah kolom `email` dan sheet `BankSoal`), lalu `clasp push` dan buat **versi deployment baru**. Isi email guru di menu Guru, lalu klik *Atur akses edit* pada ujian yang sudah di-deploy.
+
 ## [1.3.0] - 2026-11-06
 ### Dipercepat
 - **Sinkron hasil Google Form jauh lebih cepat**: inkremental (hanya respons baru sejak `Ujian.formSyncedAt`; kolom baru otomatis), satu tulis ke sheet, kiriman ganda lintas-sinkron tidak menimpa respons yang sudah dipakai. Tombol baru *Sinkron ulang penuh* (`hasil.syncForm` dengan `penuh: true`) untuk membaca ulang semua respons. Trigger 5 menit kini ikut menyinkronkan ujian aktif ber-Form (`FormResultService.syncActive`) sehingga klik manual hampir tanpa pekerjaan.

@@ -11,17 +11,28 @@ class ResultService {
   listByUjian(principal, ujianId) {
     const u = this._ujian(principal, ujianId);
     const siswa = {}; this.siswa.findAll().forEach((s) => { siswa[s.nis] = s; });
-    return this.sesi.findBy('ujianId', ujianId).map((s) => {
+    const rows = this.sesi.findBy('ujianId', ujianId).map((s) => {
       const sw = siswa[s.nis] || {};
       // mode Google Form: nilai baru ada setelah respons disinkronkan
       const menungguSinkron = !!u.formId && !s.formResponseId;
       return {
-        sesiId: s.id, nis: s.nis, nama: sw.nama || '-', kelas: sw.kelas || '-', status: s.status,
+        sesiId: s.id, nis: s.nis, nama: sw.nama || '-', kelas: sw.kelas || '-', jenjang: Jenjang.normalize(sw.jenjang) || sw.jenjang || '-', status: s.status,
         mulai: s.mulai, selesai: s.selesai,
         nilai: s.status === SESSION_STATUS.SELESAI && !menungguSinkron ? s.nilai : null,
         perluKoreksi: s.perluKoreksi, terlambat: !!s.terlambat, menungguSinkron,
       };
-    }).sort((a, b) => String(a.kelas + a.nama).localeCompare(b.kelas + b.nama));
+    });
+    // peserta yang belum membuka ujian ikut ditampilkan (status "belum") agar filter kelas/jenjang lengkap
+    const started = {}; rows.forEach((r) => { started[r.nis] = true; });
+    this.peserta.findBy('ujianId', ujianId).forEach((p) => {
+      if (started[p.nis]) return;
+      const sw = siswa[p.nis] || {};
+      rows.push({
+        sesiId: null, nis: p.nis, nama: sw.nama || '-', kelas: sw.kelas || '-', jenjang: Jenjang.normalize(sw.jenjang) || sw.jenjang || '-', status: 'belum',
+        mulai: '', selesai: '', nilai: null, perluKoreksi: false, terlambat: false, menungguSinkron: false,
+      });
+    });
+    return rows.sort((a, b) => String(a.kelas + a.nama).localeCompare(b.kelas + b.nama));
   }
 
   detail(principal, sesiId) {

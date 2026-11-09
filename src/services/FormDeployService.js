@@ -39,7 +39,30 @@ class FormDeployService {
       formNisItemId: r.nisItemId, formNamaItemId: r.namaItemId,
       formDeployedAt: Clock.iso(), formAccepting: !!u.aktif, formStale: false, formSyncedAt: '',
     });
-    return { formId: r.formId, formUrl: r.formUrl, formEditUrl: r.formEditUrl, jumlahItem: plan.length, baru: !u.formId };
+    const akses = this._applyEditors(u, r.formId);
+    return { formId: r.formId, formUrl: r.formUrl, formEditUrl: r.formEditUrl, jumlahItem: plan.length, baru: !u.formId, akses };
+  }
+
+  /** Hanya email guru pemilik ujian (yang terdaftar di data guru) yang menjadi editor Form. */
+  _applyEditors(u, formId) {
+    const guru = this.users.findById(u.guruId);
+    const email = guru && guru.email ? String(guru.email).toLowerCase() : '';
+    if (!email) return { status: 'tanpa_email', email: '', gagal: [] };
+    try {
+      const r = this.forms.syncEditors(formId, [email]);
+      return { status: r.gagal.length ? 'gagal' : 'ok', email, gagal: r.gagal };
+    } catch (e) {
+      Log.error('Atur editor Form gagal', e, { ujianId: u.id });
+      return { status: 'gagal', email, gagal: [{ email, error: String((e && e.message) || e) }] };
+    }
+  }
+
+  /** Terapkan ulang hak edit (mis. setelah email guru diubah). */
+  syncEditors(principal, ujianId) {
+    const u = this.ujian.findById(ujianId);
+    AccessPolicy.assertCanManageUjian(principal, u);
+    if (!u.formId) throw Errors.rule('FORM_BELUM_ADA', 'Ujian belum di-deploy ke Google Form.');
+    return this._applyEditors(u, u.formId);
   }
 
   /** Tutup form yang jadwal tutupnya sudah lewat (dipanggil trigger waktu). */

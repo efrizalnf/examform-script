@@ -1,15 +1,21 @@
 class SiswaService {
   constructor(deps) { Object.assign(this, deps); }
 
-  _public(s) { return { nis: s.nis, nama: s.nama, kelas: s.kelas, jenjang: s.jenjang, aktif: s.aktif }; }
+  _public(s) { return { nis: s.nis, nama: s.nama, kelas: s.kelas, jenjang: Jenjang.normalize(s.jenjang) || s.jenjang, aktif: s.aktif }; }
 
   list(filter) {
     const f = filter || {};
     const q = String(f.q || '').toLowerCase();
     return this.siswa.where((s) =>
-      (!f.kelas || s.kelas === f.kelas) && (!f.jenjang || s.jenjang === f.jenjang) &&
+      (!f.kelas || s.kelas === f.kelas) && (!f.jenjang || (Jenjang.normalize(s.jenjang) || s.jenjang) === f.jenjang) &&
       (!q || s.nama.toLowerCase().indexOf(q) >= 0 || s.nis.indexOf(q) >= 0)
     ).map((s) => this._public(s));
+  }
+
+  _jenjang(v) {
+    const j = Jenjang.normalize(v);
+    if (!j) throw Errors.validation('Jenjang harus salah satu dari: ' + Jenjang.LIST.join(', ') + '.');
+    return j;
   }
 
   _normalize(input) {
@@ -18,7 +24,7 @@ class SiswaService {
       nis: Validate.string(input.nis, 'NIS', { max: 30 }),
       nama: Validate.string(input.nama, 'Nama', { max: 100 }),
       kelas: Validate.string(input.kelas, 'Kelas', { max: 30 }),
-      jenjang: Validate.string(input.jenjang, 'Jenjang', { max: 30 }),
+      jenjang: this._jenjang(input.jenjang),
       aktif: input.aktif === undefined ? true : Validate.bool(input.aktif),
     };
   }
@@ -66,7 +72,7 @@ class SiswaService {
     const o = opts || {};
     const wanted = Array.isArray(o.nisList) && o.nisList.length ? o.nisList.map(String) : null;
     const targets = this.siswa.where((s) =>
-      (!wanted || wanted.indexOf(s.nis) >= 0) && (!o.kelas || s.kelas === o.kelas) && (!o.jenjang || s.jenjang === o.jenjang));
+      (!wanted || wanted.indexOf(s.nis) >= 0) && (!o.kelas || s.kelas === o.kelas) && (!o.jenjang || (Jenjang.normalize(s.jenjang) || s.jenjang) === Jenjang.normalize(o.jenjang)));
     if (!targets.length) throw Errors.notFound('Siswa');
     const patches = {}; const out = [];
     targets.forEach((s) => {

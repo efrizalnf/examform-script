@@ -59,6 +59,24 @@ class FormGateway {
     return item;
   }
 
+  /**
+   * Samakan daftar editor Form dengan `allowed` (email guru terdaftar). Pemilik form (akun deployer)
+   * tidak bisa/perlu dihapus. Kegagalan per email (bukan akun Google, kebijakan domain) dicatat, tidak melempar.
+   */
+  syncEditors(formId, allowed) {
+    const form = FormApp.openById(formId);
+    const want = (allowed || []).map((e) => String(e).toLowerCase());
+    const have = form.getEditors().map((u) => String(u.getEmail()).toLowerCase());
+    const out = { ditambah: [], dihapus: [], gagal: [] };
+    have.filter((e) => want.indexOf(e) < 0).forEach((e) => {
+      try { form.removeEditor(e); out.dihapus.push(e); } catch (err) { out.gagal.push({ email: e, error: String(err) }); }
+    });
+    want.filter((e) => have.indexOf(e) < 0).forEach((e) => {
+      try { form.addEditor(e); out.ditambah.push(e); } catch (err) { out.gagal.push({ email: e, error: String(err) }); }
+    });
+    return out;
+  }
+
   setAccepting(formId, accepting) {
     FormApp.openById(formId).setAcceptingResponses(!!accepting);
   }

@@ -7,7 +7,7 @@ class PesertaService {
     AccessPolicy.assertCanManageUjian(principal, this.ujian.findById(ujianId));
     const chosen = {}; this.peserta.where((p) => p.ujianId === ujianId).forEach((p) => { chosen[p.nis] = true; });
     return this.siswa.where((s) => s.aktif).map((s) => ({
-      nis: s.nis, nama: s.nama, kelas: s.kelas, jenjang: s.jenjang, terpilih: !!chosen[s.nis],
+      nis: s.nis, nama: s.nama, kelas: s.kelas, jenjang: Jenjang.normalize(s.jenjang) || s.jenjang, terpilih: !!chosen[s.nis],
     }));
   }
 

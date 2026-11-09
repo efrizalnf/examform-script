@@ -1,0 +1,37 @@
+<script>
+/* ===== Beranda: ringkasan angka + ujian terbaru ===== */
+Views.admin.push({ id: 'beranda', label: 'Beranda', icon: '⌂', render: berandaView });
+Views.guru.push({ id: 'beranda', label: 'Beranda', icon: '⌂', render: berandaView });
+
+function berandaView(box) {
+  loading(box);
+  api('dashboard.stats').then((s) => {
+    const admin = s.peran === 'admin';
+    const tile = (label, value, hint, tone, go) => h('button', { class: 'tile ' + (tone || ''), onclick: () => go && App.nav.go(go) },
+      h('span', { class: 'tile-label' }, label), h('span', { class: 'tile-value' }, String(value)), hint ? h('span', { class: 'tile-hint' }, hint) : null);
+    const tiles = [
+      admin && tile('Siswa', s.siswa, 'terdaftar', 'blue', 'siswa'),
+      admin && tile('Guru', s.guru, 'akun guru', 'violet', 'guru'),
+      tile('Ujian', s.ujian, `${s.ujianAktif} aktif · ${s.ujianDibuka} sedang dibuka`, 'green', 'ujian'),
+      tile('Sedang mengerjakan', s.sesiBerlangsung, `${s.sesiSelesai} sudah selesai`, 'amber', 'ujian'),
+      tile('Soal', s.soal, `${s.bankSoal} di bank soal`, 'blue', 'bank'),
+      tile('Google Form', s.formTerpasang, s.formPerluDeploy ? `${s.formPerluDeploy} perlu deploy ulang` : 'semua mutakhir', s.formPerluDeploy ? 'amber' : 'green', 'ujian'),
+    ].filter(Boolean);
+    const hour = new Date().getHours();
+    const sapa = hour < 11 ? 'Selamat pagi' : hour < 15 ? 'Selamat siang' : hour < 18 ? 'Selamat sore' : 'Selamat malam';
+    const state = (u) => u.dibuka ? h('span', { class: 'badge ok' }, 'Dibuka') : u.aktif ? h('span', { class: 'badge warn' }, 'Aktif · di luar jadwal') : h('span', { class: 'badge off' }, 'Nonaktif');
+    box.replaceChildren(
+      h('div', { class: 'hero' }, h('div', null, h('h2', null, `${sapa}, ${App.user.nama.split(' ')[0]}`),
+        h('p', null, admin ? 'Ringkasan seluruh sistem ujian sekolah.' : 'Ringkasan ujian yang Anda kelola.')),
+        h('div', { class: 'row' }, h('button', { class: 'primary', onclick: () => App.nav.go('ujian') }, '+ Kelola ujian'), h('button', { class: 'ghost', onclick: () => App.nav.go('bank') }, 'Bank soal'))),
+      h('div', { class: 'tiles' }, tiles),
+      h('div', { class: 'card' }, h('h3', null, 'Ujian terbaru'),
+        dataTable([
+          { label: 'Ujian', render: (u) => h('div', null, h('strong', null, u.judul), h('div', { class: 'muted' }, u.mapelNama)) },
+          { label: 'Status', render: state },
+          { label: 'Berlangsung', key: 'berlangsung' }, { label: 'Selesai', key: 'selesai' },
+          { label: 'Form', render: (u) => !u.formTerpasang ? h('span', { class: 'badge off' }, 'Belum deploy') : h('span', { class: 'badge ' + (u.formStale ? 'warn' : 'ok') }, u.formStale ? 'Perlu deploy ulang' : 'Terpasang') },
+        ], s.terbaru, 'Belum ada ujian. Mulai dari menu "Ujian, Soal & Form".')));
+  }).catch(fail);
+}
+</script>

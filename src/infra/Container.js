@@ -31,13 +31,14 @@ const Container = {
       'repo.penugasan': repo('penugasan'),
       'repo.ujian': repo('ujian'),
       'repo.soal': repo('soal'),
+      'repo.bankSoal': repo('bankSoal'),
       'repo.peserta': repo('peserta'),
       'repo.sesi': repo('sesi'),
       'repo.jawaban': repo('jawaban'),
 
       // Google Forms
       formGateway: () => new FormGateway(),
-      formDeployService: () => new FormDeployService({ ujian: g('repo.ujian'), soal: g('repo.soal'), sesi: g('repo.sesi'), forms: g('formGateway') }),
+      formDeployService: () => new FormDeployService({ ujian: g('repo.ujian'), soal: g('repo.soal'), sesi: g('repo.sesi'), users: g('repo.users'), forms: g('formGateway') }),
       formResultService: () => new FormResultService({
         ujian: g('repo.ujian'), soal: g('repo.soal'), sesi: g('repo.sesi'), forms: g('formGateway'), grading: g('gradingService'),
       }),
@@ -65,6 +66,8 @@ const Container = {
         forms: g('formGateway'),
       }),
       soalService: () => new SoalService({ soal: g('repo.soal'), ujian: g('repo.ujian'), sesi: g('repo.sesi') }),
+      bankSoalService: () => new BankSoalService({ bank: g('repo.bankSoal'), soal: g('repo.soal'), ujian: g('repo.ujian'), sesi: g('repo.sesi'), mapel: g('repo.mapel'), users: g('repo.users'), soalService: g('soalService') }),
+      dashboardService: () => new DashboardService({ ujian: g('repo.ujian'), siswa: g('repo.siswa'), users: g('repo.users'), sesi: g('repo.sesi'), soal: g('repo.soal'), mapel: g('repo.mapel'), bank: g('repo.bankSoal') }),
       pesertaService: () => new PesertaService({ peserta: g('repo.peserta'), siswa: g('repo.siswa'), ujian: g('repo.ujian') }),
       gradingService: () => new GradingService({ soal: g('repo.soal'), jawaban: g('repo.jawaban'), sesi: g('repo.sesi') }),
       studentExamService: () => new StudentExamService({
@@ -74,7 +77,7 @@ const Container = {
         throttle: g('loginThrottle'),
       }),
       resultService: () => new ResultService({
-        ujian: g('repo.ujian'), sesi: g('repo.sesi'), siswa: g('repo.siswa'), soal: g('repo.soal'),
+        ujian: g('repo.ujian'), peserta: g('repo.peserta'), sesi: g('repo.sesi'), siswa: g('repo.siswa'), soal: g('repo.soal'),
         jawaban: g('repo.jawaban'), grading: g('gradingService'),
       }),
     };

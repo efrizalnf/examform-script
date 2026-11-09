@@ -17,6 +17,7 @@ function adminGuruView(box) {
       title: g ? 'Ubah guru' : 'Tambah guru',
       fields: [
         { name: 'nama', label: 'Nama', required: true }, { name: 'username', label: 'Username', required: true },
+        { name: 'email', label: 'Email Google guru', type: 'email', hint: 'Hanya email ini yang diberi hak mengedit Google Form ujian guru tersebut.' },
         !g && { name: 'password', label: 'Password (kosongkan untuk generate otomatis)', type: 'text' },
         { name: 'aktif', label: 'Akun aktif', type: 'checkbox', default: true },
       ].filter(Boolean),
@@ -26,13 +27,21 @@ function adminGuruView(box) {
         reload();
       },
     });
+    const emailForm = (g) => formModal({
+      title: 'Email Google guru — ' + g.nama,
+      fields: [{ name: 'email', label: 'Alamat email', type: 'email', hint: 'Hanya email ini yang boleh mengedit Google Form ujian guru tersebut. Setelah mengubah, klik "Atur akses edit" pada ujian yang sudah di-deploy.' }],
+      initial: { email: g.email || '' },
+      onSubmit: async (v) => { await api('admin.guru.save', { id: g.id, username: g.username, nama: g.nama, aktif: g.aktif, email: v.email }); toast('Email guru disimpan.'); reload(); },
+    });
     box.replaceChildren(
       h('div', { style: 'margin-bottom:1rem' }, h('button', { class: 'primary', onclick: () => form(null) }, '+ Tambah guru')),
       h('div', { class: 'card' }, dataTable([
-        { label: 'Nama', key: 'nama' }, { label: 'Username', key: 'username' }, { label: 'Status', render: (g) => badge(g.aktif) },
+        { label: 'Nama', key: 'nama' }, { label: 'Username', key: 'username' },
+        { label: 'Email', render: (g) => h('button', { class: 'small ghost', title: 'Klik untuk mengubah email', onclick: () => emailForm(g) }, g.email || '+ isi email') }, { label: 'Status', render: (g) => badge(g.aktif) },
         { label: 'Penugasan', key: 'jumlahPenugasan' },
         { label: 'Aksi', render: (g) => h('div', { class: 'row' },
           actionBtn('Ubah', async () => form(g)),
+          actionBtn('Email', async () => emailForm(g)),
           actionBtn('Atur mapel', async () => App.nav.go('penugasan')),
           actionBtn('Reset password', async () => { if (await confirmBox(`Reset password ${g.nama}?`)) { const r = await api('admin.guru.resetPassword', { id: g.id }); showCredentials('Password baru', [Object.assign({ nama: g.nama }, r)], [{ key: 'nama', label: 'Nama' }, { key: 'username', label: 'Username' }, { key: 'password', label: 'Password' }]); } }),
           actionBtn('Hapus', async () => { if (await confirmBox(`Hapus guru ${g.nama}?`)) { await api('admin.guru.remove', { id: g.id }); reload(); } }, 'danger')) },
@@ -89,17 +98,18 @@ function masterView(box, key, label) {
 function adminSiswaView(box) {
   const kelas = h('input', { placeholder: 'Filter kelas, mis. X-1', style: 'width:180px' });
   const q = h('input', { placeholder: 'Cari nama / NIS', style: 'width:200px' });
+  const jenjang = h('select', { style: 'width:150px', onchange: () => load() }, h('option', { value: '' }, 'Semua jenjang'), JENJANG.map((j) => h('option', { value: j }, j)));
   const holder = h('div', { class: 'card' });
   let timer;
   const load = () => {
     loading(holder);
-    api('admin.siswa.list', { kelas: kelas.value.trim(), q: q.value.trim() }).then((list) => {
+    api('admin.siswa.list', { kelas: kelas.value.trim(), jenjang: jenjang.value, q: q.value.trim() }).then((list) => {
       const form = (s) => formModal({
         title: s ? 'Ubah siswa' : 'Tambah siswa',
         fields: [
           { name: 'nis', label: 'NIS', required: true, hint: s ? 'NIS tidak dapat diubah.' : '' },
           { name: 'nama', label: 'Nama', required: true }, { name: 'kelas', label: 'Kelas', required: true },
-          { name: 'jenjang', label: 'Jenjang', required: true, hint: 'mis. SMA / SMP / SD' },
+          { name: 'jenjang', label: 'Jenjang', type: 'select', required: true, options: JENJANG.map((j) => ({ value: j, label: j })) },
           { name: 'aktif', label: 'Akun aktif', type: 'checkbox', default: true },
         ], initial: s,
         onSubmit: async (v) => {
@@ -119,10 +129,10 @@ function adminSiswaView(box) {
     }).catch(fail);
   };
   const importDialog = () => {
-    const ta = h('textarea', { style: 'min-height:200px', placeholder: '00123\tAni Wijaya\tX-1\tSMA\n00124\tBudi\tX-1\tSMA' });
+    const ta = h('textarea', { style: 'min-height:200px', placeholder: '00123\tAni Wijaya\tX-1\tSMA/MA\n00124\tBudi\tX-1\tSMA/MA' });
     openModal({
       title: 'Impor siswa', wide: true,
-      content: h('div', null, h('p', { class: 'muted' }, 'Tempel dari Excel/Sheets. Kolom: NIS, Nama, Kelas, Jenjang (pisah Tab atau koma). NIS yang sudah ada akan diperbarui; siswa baru otomatis diberi password.'), ta),
+      content: h('div', null, h('p', { class: 'muted' }, 'Tempel dari Excel/Sheets. Kolom: NIS, Nama, Kelas, Jenjang (pisah Tab atau koma). Jenjang: SD/MI, SMP/MTs, atau SMA/MA (SD, MI, SMP, MTS, SMA, MA juga dikenali). NIS yang sudah ada akan diperbarui; siswa baru otomatis diberi password.'), ta),
       buttons: [{ label: 'Batal' }, { label: 'Impor', kind: 'primary', onClick: async () => {
         const rows = ta.value.split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
           const c = l.split(l.indexOf('\t') >= 0 ? '\t' : ',').map((x) => x.trim());
@@ -141,7 +151,7 @@ function adminSiswaView(box) {
     title: 'Generate password massal',
     fields: [
       { name: 'kelas', label: 'Kelas (kosongkan = semua siswa)' },
-      { name: 'jenjang', label: 'Jenjang (opsional)' },
+      { name: 'jenjang', label: 'Jenjang (opsional)', type: 'select', options: [{ value: '', label: 'Semua jenjang' }].concat(JENJANG.map((j) => ({ value: j, label: j }))) },
     ],
     submitLabel: 'Generate',
     onSubmit: async (v) => {
@@ -154,7 +164,7 @@ function adminSiswaView(box) {
     h('div', { class: 'row', style: 'margin-bottom:1rem' },
       h('button', { class: 'primary', onclick: () => holder._form && holder._form(null) }, '+ Tambah siswa'),
       h('button', { onclick: importDialog }, 'Impor massal'), h('button', { onclick: bulkDialog }, 'Generate password massal'),
-      h('span', { class: 'right row' }, kelas, q)),
+      h('span', { class: 'right row' }, jenjang, kelas, q)),
     holder);
   [kelas, q].forEach((i) => i.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(load, 350); }));
   load();

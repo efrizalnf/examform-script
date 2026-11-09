@@ -4,13 +4,14 @@ class UjianService {
   _lookup(repo) { const m = {}; repo.findAll().forEach((r) => { m[r.id] = r.nama; }); return m; }
 
   _enrich(list) {
+    const guruEmail = {}; this.users.findAll().forEach((x) => { guruEmail[x.id] = x.email || ''; });
     const guru = this._lookup(this.users), mapel = this._lookup(this.mapel), jenis = this._lookup(this.jenis);
     // Hanya kolom yang dibutuhkan (tabel Soal bisa besar: jangan memuat seluruh isinya hanya untuk menghitung).
     const nSoal = {}, nAktif = {}, nPeserta = {};
     this.soal.pluck(['ujianId', 'aktif']).forEach((s) => { nSoal[s.ujianId] = (nSoal[s.ujianId] || 0) + 1; if (s.aktif) nAktif[s.ujianId] = (nAktif[s.ujianId] || 0) + 1; });
     this.peserta.pluck(['ujianId']).forEach((p) => { nPeserta[p.ujianId] = (nPeserta[p.ujianId] || 0) + 1; });
     return list.map((u) => Object.assign({}, u, {
-      guruNama: guru[u.guruId] || '-', mapelNama: mapel[u.mapelId] || '-', jenisUjianNama: jenis[u.jenisUjianId] || '-',
+      guruNama: guru[u.guruId] || '-', guruEmail: guruEmail[u.guruId] || '', mapelNama: mapel[u.mapelId] || '-', jenisUjianNama: jenis[u.jenisUjianId] || '-',
       jumlahSoal: nSoal[u.id] || 0, jumlahSoalAktif: nAktif[u.id] || 0, jumlahPeserta: nPeserta[u.id] || 0,
       mode: u.formId ? EXAM_MODE.GFORM : EXAM_MODE.NATIVE,
     }));

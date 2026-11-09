@@ -81,6 +81,9 @@ class MockItem {
 class MockForm {
   constructor(id, title) { Object.assign(this, { id, title, items: [], responses: [], accepting: true, settings: {}, counter: 0 }); }
   getId() { return this.id; }
+  getEditors() { return (this.editors = this.editors || []).map((e) => ({ getEmail: () => e })); }
+  addEditor(e) { this.editors = this.editors || []; if (/invalid/.test(e)) throw new Error('Bukan akun Google'); if (this.editors.indexOf(e) < 0) this.editors.push(e); return this; }
+  removeEditor(e) { this.editors = (this.editors || []).filter((x) => x !== e); return this; }
   getPublishedUrl() { return `https://docs.google.com/forms/d/e/${this.id}/viewform`; }
   getEditUrl() { return `https://docs.google.com/forms/d/${this.id}/edit`; }
   setTitle(t) { this.title = t; return this; }

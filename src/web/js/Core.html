@@ -1,6 +1,7 @@
 <script>
 /* ===== Core: DOM helper, API client, UI primitives ===== */
 const App = { token: null, user: null, nav: null };
+const JENJANG = ['SD/MI', 'SMP/MTs', 'SMA/MA']; // harus sama dengan Jenjang.LIST di server
 
 function h(tag, attrs, ...kids) {
   const e = document.createElement(tag);

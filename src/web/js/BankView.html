@@ -1,0 +1,76 @@
+<script>
+/* ===== Bank soal: simpan soal dari ujian, pakai ulang di ujian lain ===== */
+Views.admin.push({ id: 'bank', label: 'Bank Soal', icon: '▤', render: (box) => bankView(box, true) });
+Views.guru.push({ id: 'bank', label: 'Bank Soal', icon: '▤', render: (box) => bankView(box, false) });
+
+/** Filter + daftar soal bank. `onPick` (opsional) = mode pemilih dengan kotak centang. */
+function bankFilterBar(all, redraw) {
+  const mapelOpts = []; const seen = {};
+  all.forEach((b) => { if (!seen[b.mapelId]) { seen[b.mapelId] = 1; mapelOpts.push(b); } });
+  const mapel = h('select', null, h('option', { value: '' }, 'Semua mapel'), mapelOpts.map((b) => h('option', { value: b.mapelId }, b.mapelNama)));
+  const tipe = h('select', null, h('option', { value: '' }, 'Semua tipe'), Object.keys(TIPE_LABEL).map((k) => h('option', { value: k }, TIPE_LABEL[k])));
+  const q = h('input', { placeholder: 'Cari teks soal…' });
+  [mapel, tipe].forEach((e) => e.addEventListener('change', redraw)); q.addEventListener('input', redraw);
+  const filter = (b) => (!mapel.value || b.mapelId === mapel.value) && (!tipe.value || b.tipe === tipe.value) &&
+    (!q.value || b.teks.toLowerCase().indexOf(q.value.toLowerCase()) >= 0);
+  return { el: h('div', { class: 'row filters' }, h('div', { style: 'width:180px' }, mapel), h('div', { style: 'width:190px' }, tipe), h('div', { style: 'flex:1;min-width:180px' }, q)), filter };
+}
+
+function bankView(box, isAdmin) {
+  const reload = () => bankView(box, isAdmin);
+  loading(box);
+  api('bank.list').then((all) => {
+    const holder = h('div');
+    const bar = bankFilterBar(all, () => draw());
+    const draw = () => {
+      const rows = all.filter(bar.filter);
+      holder.replaceChildren(dataTable([
+        { label: 'Mapel', key: 'mapelNama' }, { label: 'Tipe', render: (b) => TIPE_LABEL[b.tipe] || b.tipe },
+        { label: 'Soal', wrap: true, render: (b) => h('div', null, h('div', null, b.teks), soalPreview(b)) },
+        { label: 'Bobot', key: 'bobot' }, { label: 'Asal ujian', render: (b) => h('span', { class: 'muted' }, b.sumber || '-') },
+        isAdmin && { label: 'Pemilik', key: 'ownerNama' },
+        { label: 'Aksi', render: (b) => actionBtn('Hapus', async () => { if (await confirmBox('Hapus soal dari bank soal? Soal yang sudah dipakai di ujian tidak terpengaruh.')) { await api('bank.remove', { id: b.id }); reload(); } }, 'danger') },
+      ].filter(Boolean), rows, all.length ? 'Tidak ada soal yang cocok dengan filter.' : 'Bank soal masih kosong. Buka menu "Ujian, Soal & Form" → Soal → "Simpan semua ke bank soal".'));
+    };
+    box.replaceChildren(h('p', { class: 'muted' }, `${all.length} soal tersimpan. Soal disalin ke ujian saat dipakai, jadi mengubahnya di ujian tidak mengubah bank.`),
+      h('div', { class: 'card' }, bar.el, holder));
+    draw();
+  }).catch(fail);
+}
+
+/** Dialog memilih soal dari bank untuk dimasukkan ke ujian. */
+function bankPicker(ujian, done) {
+  return api('bank.list').then((all) => {
+    if (!all.length) return toast('Bank soal masih kosong. Simpan soal dari ujian lain terlebih dahulu.', 'error');
+    const chosen = {};
+    const count = h('strong'); const holder = h('div', { class: 'picker' });
+    const bar = bankFilterBar(all, () => draw());
+    // default: mapel yang sama dengan ujian
+    const draw = () => {
+      const rows = all.filter(bar.filter);
+      count.textContent = `${Object.keys(chosen).filter((k) => chosen[k]).length} soal dipilih`;
+      holder.replaceChildren(dataTable([
+        { label: '', render: (b) => h('input', { type: 'checkbox', checked: !!chosen[b.id], onchange: (e) => { chosen[b.id] = e.target.checked; count.textContent = `${Object.keys(chosen).filter((k) => chosen[k]).length} soal dipilih`; } }) },
+        { label: 'Tipe', render: (b) => TIPE_LABEL[b.tipe] || b.tipe },
+        { label: 'Soal', wrap: true, render: (b) => h('div', null, h('div', null, b.teks), soalPreview(b)) }, { label: 'Bobot', key: 'bobot' },
+      ], rows, 'Tidak ada soal yang cocok.'));
+    };
+    const pickAll = (v) => { all.filter(bar.filter).forEach((b) => { chosen[b.id] = v; }); draw(); };
+    openModal({
+      title: 'Ambil soal dari bank soal', wide: true,
+      content: h('div', null, bar.el,
+        h('div', { class: 'row', style: 'margin:.5rem 0' }, h('button', { class: 'small', onclick: () => pickAll(true) }, 'Pilih yang tampil'), h('button', { class: 'small', onclick: () => pickAll(false) }, 'Kosongkan'), count), holder),
+      buttons: [{ label: 'Batal' }, {
+        label: 'Tambahkan ke ujian', kind: 'primary', onClick: async () => {
+          const ids = Object.keys(chosen).filter((k) => chosen[k]);
+          if (!ids.length) throw { message: 'Pilih minimal satu soal.' };
+          const r = await api('bank.import', { ujianId: ujian.id, bankIds: ids });
+          toast(`${r.ditambah} soal ditambahkan` + (r.dilewati ? `, ${r.dilewati} sudah ada (dilewati).` : '.') + (r.ditambah && ujian.formId ? ' Deploy ulang Form agar soal baru ikut.' : ''));
+          done();
+        },
+      }],
+    });
+    draw();
+  }).catch(fail);
+}
+</script>

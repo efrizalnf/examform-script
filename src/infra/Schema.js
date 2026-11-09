@@ -12,6 +12,7 @@ const Schema = {
       { name: 'role' }, // admin | guru
       { name: 'passwordHash' }, { name: 'salt' },
       { name: 'aktif', type: 'bool' }, { name: 'dibuatPada' },
+      { name: 'email' }, // email akun Google guru: satu-satunya yang boleh mengedit Google Form ujiannya
     ],
   },
   siswa: {
@@ -70,6 +71,14 @@ const Schema = {
       { name: 'bobot', type: 'number' }, { name: 'urutan', type: 'number' },
       { name: 'aktif', type: 'bool' }, { name: 'dibuatPada' },
       { name: 'formItems', type: 'json' }, // {sub: itemIdForm} hasil deploy
+    ],
+  },
+  bankSoal: {
+    sheet: 'BankSoal', minRows: 3000,
+    columns: [
+      { name: 'id' }, { name: 'ownerId' }, { name: 'mapelId' }, { name: 'tipe' }, { name: 'teks' },
+      { name: 'opsi', type: 'json' }, { name: 'kunci', type: 'json' }, { name: 'bobot', type: 'number' },
+      { name: 'hash' }, { name: 'sumber' }, { name: 'dibuatPada' },
     ],
   },
   peserta: {

@@ -8,18 +8,16 @@ function ujianListView(box, role) {
     const cols = [
       { label: 'Ujian', render: (u) => h('div', null, h('strong', null, u.judul), h('div', { class: 'muted' }, `${u.mapelNama} · ${u.jenisUjianNama}`)) },
       !isGuru && { label: 'Guru', key: 'guruNama' },
-      { label: 'Waktu', render: (u) => `${u.durasiMenit} mnt` },
-      { label: 'Jadwal', render: (u) => (u.mulai || u.selesai) ? `${fmtDateTime(u.mulai)} – ${fmtDateTime(u.selesai)}` : 'Kapan saja' },
-      { label: 'Soal aktif', render: (u) => `${u.jumlahSoalAktif}/${u.jumlahSoal}` },
-      { label: 'Peserta', key: 'jumlahPeserta' },
-      { label: 'Token', render: (u) => h('span', { class: 'mono' }, u.token) },
-      { label: 'Kode keluar', render: (u) => h('span', { class: 'mono' }, u.kodeKeluar || '—') },
-      { label: 'Google Form', render: (u) => formCell(u) },
+      { label: 'Jadwal', render: (u) => h('div', null, h('div', null, `${u.durasiMenit} mnt`),
+        h('div', { class: 'muted small-text' }, (u.mulai || u.selesai) ? `${fmtDateTime(u.mulai)} – ${fmtDateTime(u.selesai)}` : 'Kapan saja')) },
+      { label: 'Soal / Peserta', render: (u) => h('div', null, h('div', null, `${u.jumlahSoalAktif}/${u.jumlahSoal} soal aktif`), h('div', { class: 'muted small-text' }, `${u.jumlahPeserta} peserta`)) },
+      { label: 'Token / Kode keluar', render: (u) => h('div', null, h('div', null, h('span', { class: 'mono' }, u.token)), h('div', { style: 'margin-top:.2rem' }, h('span', { class: 'mono' }, u.kodeKeluar || '—'))) },
+      { label: 'Google Form', wrap: true, render: (u) => formCell(u, reload) },
       { label: 'Status', render: (u) => actionBtn(u.aktif ? 'Nonaktifkan' : 'Aktifkan', async () => {
         const r = await api('ujian.setAktif', { id: u.id, aktif: !u.aktif });
         toast(r.formWarning || (u.aktif ? 'Ujian dinonaktifkan.' : 'Ujian diaktifkan.'), r.formWarning ? 'error' : undefined); reload();
       }, u.aktif ? 'danger' : 'primary') },
-      { label: 'Aksi', render: (u) => h('div', { class: 'row' },
+      { label: 'Aksi', wrap: true, render: (u) => h('div', { class: 'row', style: 'min-width:210px' },
         actionBtn('Soal', async () => soalView(box, u, role, reload)),
         actionBtn('Peserta', async () => pesertaView(box, u, reload)),
         actionBtn(u.formId ? (u.formStale ? 'Deploy ulang ⚠' : 'Deploy ulang') : 'Deploy ke Form', async () => deployForm(u, reload), u.formStale || !u.formId ? 'primary' : ''),
@@ -36,13 +34,26 @@ function ujianListView(box, role) {
   }).catch(fail);
 }
 
-function formCell(u) {
+function formCell(u, reload) {
   if (!u.formId) return h('span', { class: 'badge off' }, 'Belum deploy');
+  const akses = u.guruEmail
+    ? h('div', { class: 'muted small-text' }, 'Editor: ' + u.guruEmail)
+    : h('div', null, h('span', { class: 'badge warn' }, 'Email guru belum diisi'));
   return h('div', null,
     h('span', { class: 'badge ' + (u.formStale ? 'warn' : 'ok') }, u.formStale ? 'Perlu deploy ulang' : 'Terpasang'),
-    h('div', { class: 'row', style: 'margin-top:.25rem' },
-      h('a', { href: u.formEditUrl, target: '_blank', rel: 'noopener' }, 'Edit'), ' · ',
-      h('a', { href: u.formUrl, target: '_blank', rel: 'noopener' }, 'Buka')));
+    h('div', { class: 'row', style: 'margin:.3rem 0' },
+      h('a', { class: 'linkbtn', href: u.formEditUrl, target: '_blank', rel: 'noopener', title: 'Hanya akun Google guru pemilik (email terdaftar) yang dapat membuka editor' }, 'Edit Form ↗'),
+      h('a', { href: u.formUrl, target: '_blank', rel: 'noopener' }, 'Buka')),
+    akses,
+    actionBtn('Atur akses edit', async () => { const r = await api('ujian.syncEditors', { id: u.id }); toast(aksesText(r), r.status === 'ok' ? undefined : 'error'); reload(); }));
+}
+
+/** Teks ringkas hasil pengaturan editor Form. */
+function aksesText(a) {
+  if (!a) return '';
+  if (a.status === 'ok') return `Hak edit Form hanya untuk ${a.email}.`;
+  if (a.status === 'tanpa_email') return 'Email guru belum diisi di menu Guru, jadi tidak ada yang diberi hak edit. Isi email lalu klik "Atur akses edit".';
+  return 'Gagal memberi hak edit ke ' + a.email + (a.gagal && a.gagal[0] ? ': ' + a.gagal[0].error : '') + '. Pastikan email adalah akun Google yang valid.';
 }
 
 /** Deploy / deploy ulang soal ujian menjadi Google Form (bisa 10–60 dtk untuk soal banyak). */
@@ -57,7 +68,8 @@ async function deployForm(u, done) {
     title: r.baru ? 'Google Form dibuat' : 'Google Form diperbarui',
     content: h('div', null,
       h('p', null, `${r.jumlahItem} item soal dipasang.`),
-      h('p', null, h('a', { href: r.formEditUrl, target: '_blank', rel: 'noopener' }, 'Buka editor Google Form'), ' · ', h('a', { href: r.formUrl, target: '_blank', rel: 'noopener' }, 'Pratinjau formulir')),
+      h('p', null, h('a', { class: 'linkbtn', href: r.formEditUrl, target: '_blank', rel: 'noopener' }, 'Buka editor Google Form ↗'), ' · ', h('a', { href: r.formUrl, target: '_blank', rel: 'noopener' }, 'Pratinjau formulir')),
+      h('p', { class: r.akses && r.akses.status === 'ok' ? 'badge ok' : 'badge warn', style: 'white-space:normal' }, aksesText(r.akses)),
       h('p', { class: 'muted' }, 'Jangan mengubah isi Form secara manual — pemetaan jawaban ke bank soal akan rusak. Ubah soal di sini lalu Deploy ulang.')),
   });
   done();
@@ -106,10 +118,17 @@ function soalView(box, ujian, role, back) {
       { label: 'Aktif', render: (q) => actionBtn(q.aktif ? 'Aktif ✓' : 'Nonaktif', async () => { await api('soal.setAktif', { id: q.id, aktif: !q.aktif }); reload(); }, q.aktif ? '' : 'danger') },
       isGuru && { label: 'Aksi', render: (q) => h('div', { class: 'row' },
         actionBtn('Ubah', async () => soalEditor(ujian.id, q, reload)),
+        actionBtn('Ke bank', async () => { const r = await api('bank.saveFromUjian', { ujianId: ujian.id, soalIds: [q.id] }); toast(r.disimpan ? 'Disimpan ke bank soal.' : 'Soal sudah ada di bank soal.'); }),
         actionBtn('Hapus', async () => { if (await confirmBox('Hapus soal ini?')) { await api('soal.remove', { id: q.id }); reload(); } }, 'danger')) },
     ].filter(Boolean);
     box.replaceChildren(backBar(`Soal — ${ujian.judul}`, back),
-      isGuru && h('div', { style: 'margin-bottom:1rem' }, h('button', { class: 'primary', onclick: () => soalEditor(ujian.id, null, reload) }, '+ Tambah soal')),
+      isGuru && h('div', { class: 'row', style: 'margin-bottom:1rem' },
+        h('button', { class: 'primary', onclick: () => soalEditor(ujian.id, null, reload) }, '+ Tambah soal'),
+        actionBtn('Ambil dari bank soal', async () => bankPicker(ujian, reload)),
+        list.length ? actionBtn('Simpan semua ke bank soal', async () => {
+          const r = await api('bank.saveFromUjian', { ujianId: ujian.id });
+          toast(`${r.disimpan} soal disimpan ke bank soal` + (r.duplikat ? `, ${r.duplikat} sudah ada (dilewati).` : '.'));
+        }) : null),
       h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada soal.')));
   }).catch(fail);
 }
@@ -120,10 +139,11 @@ function pesertaView(box, ujian, back) {
     const chosen = {}; list.forEach((s) => { chosen[s.nis] = s.terpilih; });
     const kelasList = Array.from(new Set(list.map((s) => s.kelas))).sort();
     const kelasSel = h('select', null, h('option', { value: '' }, 'Semua kelas'), kelasList.map((k) => h('option', { value: k }, k)));
+    const jenjangSel = h('select', null, h('option', { value: '' }, 'Semua jenjang'), JENJANG.map((j) => h('option', { value: j }, j)));
     const search = h('input', { placeholder: 'Cari nama / NIS…' });
     const counter = h('strong');
     const holder = h('div');
-    const visible = () => list.filter((s) => (!kelasSel.value || s.kelas === kelasSel.value) &&
+    const visible = () => list.filter((s) => (!kelasSel.value || s.kelas === kelasSel.value) && (!jenjangSel.value || s.jenjang === jenjangSel.value) &&
       (!search.value || (s.nama + s.nis).toLowerCase().indexOf(search.value.toLowerCase()) >= 0));
     const refresh = () => {
       counter.textContent = `${Object.keys(chosen).filter((k) => chosen[k]).length} peserta terpilih`;
@@ -132,11 +152,11 @@ function pesertaView(box, ujian, back) {
         { label: 'NIS', key: 'nis' }, { label: 'Nama', key: 'nama' }, { label: 'Kelas', key: 'kelas' }, { label: 'Jenjang', key: 'jenjang' },
       ], visible(), 'Tidak ada siswa.'));
     };
-    kelasSel.addEventListener('change', refresh); search.addEventListener('input', refresh);
+    kelasSel.addEventListener('change', refresh); jenjangSel.addEventListener('change', refresh); search.addEventListener('input', refresh);
     const mark = (val) => { visible().forEach((s) => { chosen[s.nis] = val; }); refresh(); };
     box.replaceChildren(backBar(`Peserta — ${ujian.judul}`, back),
       h('div', { class: 'card' },
-        h('div', { class: 'row', style: 'margin-bottom:.75rem' }, h('div', { style: 'width:200px' }, kelasSel), h('div', { style: 'width:240px' }, search),
+        h('div', { class: 'row', style: 'margin-bottom:.75rem' }, h('div', { style: 'width:150px' }, jenjangSel), h('div', { style: 'width:200px' }, kelasSel), h('div', { style: 'width:240px' }, search),
           h('button', { onclick: () => mark(true) }, 'Pilih yang tampil'), h('button', { onclick: () => mark(false) }, 'Kosongkan yang tampil'),
           h('span', { class: 'right' }, counter),
           h('button', { class: 'primary', onclick: (e) => busy(e.currentTarget, async () => {
@@ -154,10 +174,10 @@ function hasilView(box, ujian, back) {
     const reload = () => hasilView(box, ujian, back);
     const cols = [
       { label: 'NIS', key: 'nis' }, { label: 'Nama', key: 'nama' }, { label: 'Kelas', key: 'kelas' },
-      { label: 'Status', render: (r) => h('span', { class: 'badge ' + (r.status === 'selesai' ? 'ok' : 'warn') }, r.status) },
+      { label: 'Status', render: (r) => h('span', { class: 'badge ' + (r.status === 'selesai' ? 'ok' : r.status === 'belum' ? 'off' : 'warn') }, r.status === 'belum' ? 'belum mulai' : r.status) },
       { label: 'Nilai', render: (r) => r.menungguSinkron ? h('span', { class: 'muted' }, 'menunggu sinkron') : (r.nilai === null ? '-' : h('strong', null, String(r.nilai))) },
       { label: 'Catatan', render: (r) => h('div', { class: 'row' }, r.perluKoreksi ? h('span', { class: 'badge warn' }, 'Essay belum dinilai') : null, r.terlambat ? h('span', { class: 'badge warn' }, 'Terlambat') : null) },
-      { label: 'Aksi', render: (r) => r.menungguSinkron ? '' : actionBtn('Detail', async () => hasilDetail(r.sesiId, reload)) },
+      { label: 'Aksi', render: (r) => (r.menungguSinkron || !r.sesiId) ? '' : actionBtn('Detail', async () => hasilDetail(r.sesiId, reload)) },
     ];
     const doSync = (penuh) => async () => {
       toast(penuh ? 'Membaca ULANG semua respons Google Form (bisa agak lama)…' : 'Mengambil respons baru dari Google Form…');
@@ -167,12 +187,32 @@ function hasilView(box, ujian, back) {
         (r.tanpaSesi.length ? `, NIS tanpa sesi: ${r.tanpaSesi.join(', ')}` : '') + '.');
       reload();
     };
+    const kelasList = Array.from(new Set(list.map((r) => r.kelas))).sort();
+    const kelasSel = h('select', { 'aria-label': 'Filter kelas' }, h('option', { value: '' }, `Semua kelas (${list.length})`),
+      kelasList.map((k) => h('option', { value: k }, `${k} (${list.filter((r) => r.kelas === k).length})`)));
+    const jenjangSel = h('select', { 'aria-label': 'Filter jenjang' }, h('option', { value: '' }, 'Semua jenjang'),
+      JENJANG.filter((j) => list.some((r) => r.jenjang === j)).map((j) => h('option', { value: j }, j)));
+    kelasSel.value = hasilView.kelas && kelasList.indexOf(hasilView.kelas) >= 0 ? hasilView.kelas : '';
+    const summary = h('div', { class: 'stat-row' });
+    const holder = h('div');
+    const draw = () => {
+      hasilView.kelas = kelasSel.value;
+      const rows = list.filter((r) => (!kelasSel.value || r.kelas === kelasSel.value) && (!jenjangSel.value || r.jenjang === jenjangSel.value));
+      const nilai = rows.filter((r) => r.nilai !== null && r.nilai !== undefined).map((r) => Number(r.nilai));
+      const stat = (label, val) => h('div', { class: 'stat-mini' }, h('div', { class: 'v' }, String(val)), h('div', { class: 'l' }, label));
+      summary.replaceChildren(stat('Peserta', rows.length), stat('Selesai', rows.filter((r) => r.status === 'selesai').length),
+        stat('Rata-rata', nilai.length ? (nilai.reduce((a, b) => a + b, 0) / nilai.length).toFixed(1) : '-'),
+        stat('Tertinggi', nilai.length ? Math.max.apply(null, nilai) : '-'), stat('Terendah', nilai.length ? Math.min.apply(null, nilai) : '-'));
+      holder.replaceChildren(dataTable(cols, rows, 'Belum ada siswa yang mengerjakan' + (kelasSel.value ? ' di kelas ini.' : '.')));
+    };
+    kelasSel.addEventListener('change', draw); jenjangSel.addEventListener('change', draw);
     const syncBtn = ujian.formId ? h('div', { class: 'row' },
       actionBtn('Sinkronkan hasil dari Google Form', doSync(false), 'primary'),
       actionBtn('Sinkron ulang penuh', doSync(true))) : null;
     box.replaceChildren(backBar(`Hasil — ${ujian.judul}`, back),
       syncBtn && h('div', { class: 'row', style: 'margin-bottom:1rem' }, syncBtn, h('span', { class: 'muted' }, 'Hanya respons baru yang dibaca; sinkron otomatis juga berjalan tiap ±5 menit selama ujian aktif.')),
-      h('div', { class: 'card' }, dataTable(cols, list, 'Belum ada siswa yang mengerjakan.')));
+      h('div', { class: 'card' }, h('div', { class: 'row', style: 'margin-bottom:.75rem' }, h('div', { style: 'width:170px' }, jenjangSel), h('div', { style: 'width:200px' }, kelasSel), summary), holder));
+    draw();
   }).catch(fail);
 }
 

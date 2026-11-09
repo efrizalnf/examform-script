@@ -12,7 +12,7 @@ const must = (r, label) => { if (!r.success) throw new Error(`${label}: ${JSON.s
   console.log('# setup');
   const setup = run('setup()');
   check('admin dibuat', setup.admin && setup.admin.password);
-  check('sheet default dihapus & 10 sheet dibuat', run('SpreadsheetProvider.get().getSheets().length') === 10);
+  check('sheet default dihapus & 11 sheet dibuat', run('SpreadsheetProvider.get().getSheets().length') === 11);
   check('setup idempotent', run('setup()').admin === null);
 
   console.log('# auth');
@@ -106,7 +106,9 @@ const must = (r, label) => { if (!r.success) throw new Error(`${label}: ${JSON.s
 
   console.log('# guru: hasil & koreksi essay');
   const hasil = must(call('hasil.list', { ujianId: U }, G), 'hasil');
-  check('hasil tercatat, perlu koreksi', hasil.length === 1 && hasil[0].perluKoreksi === true && hasil[0].nilai === 71.43);
+  const hasilSesi = hasil.filter((r) => r.sesiId);
+  check('hasil tercatat, perlu koreksi', hasilSesi.length === 1 && hasilSesi[0].perluKoreksi === true && hasilSesi[0].nilai === 71.43);
+  check('peserta yang belum mulai tampil berstatus belum, jenjang baku', hasil.length > hasilSesi.length && hasil.filter((r) => !r.sesiId).every((r) => r.status === 'belum') && hasil[0].jenjang === 'SMA/MA');
   const sc = must(call('hasil.nilaiEssay', { sesiId: st.sesi.id, soalId: s4.id, skor: 4 }, G), 'essay');
   check('nilai akhir 100 setelah essay', sc.nilai === 100 && sc.perluKoreksi === false);
   check('skor essay > bobot ditolak', !call('hasil.nilaiEssay', { sesiId: st.sesi.id, soalId: s4.id, skor: 9 }, G).success);

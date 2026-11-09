@@ -3,30 +3,55 @@
 const Views = { admin: [], guru: [] }; // diisi oleh AdminViews / GuruViews: {id, label, render(container)}
 
 /**
- * Sesi login disimpan di sessionStorage (hilang saat tab ditutup) agar refresh halaman tidak
- * memaksa login ulang. Aman-gagal: bila storage diblokir, perilaku kembali seperti semula.
- * Token tetap divalidasi server pada panggilan berikutnya (UNAUTHORIZED -> logout otomatis).
+ * Sesi login dipertahankan saat refresh. Web App Apps Script berjalan di iframe ber-sandbox sehingga
+ * sessionStorage sering tidak bertahan/terblokir; karena itu sesi juga ditulis ke hash URL halaman
+ * induk (google.script.history) dan dibaca lagi lewat google.script.url.getLocation.
+ * Hash tidak pernah dikirim ke server. Token tetap divalidasi server (kedaluwarsa -> logout otomatis)
+ * dan masa berlakunya terbatas (8 jam); tombol Keluar menghapusnya dari storage maupun URL.
  */
 const SessionStore = {
-  KEY: 'examform.session',
-  save() {
-    try { sessionStorage.setItem(this.KEY, JSON.stringify({ token: App.token, user: App.user, nav: App.nav && App.nav.id })); } catch (e) { /* abaikan */ }
-  },
-  load() {
+  KEY: 'examform.session', PREFIX: 'sesi=',
+  _payload() { return JSON.stringify({ token: App.token, user: App.user, nav: App.nav && App.nav.id }); },
+  _encode(str) { return this.PREFIX + btoa(unescape(encodeURIComponent(str))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); },
+  _decode(hash) {
     try {
-      const s = JSON.parse(sessionStorage.getItem(this.KEY) || 'null');
-      return s && s.token && s.user && s.user.role ? s : null;
+      const m = String(hash || '').replace(/^#/, ''); if (m.indexOf(this.PREFIX) !== 0) return null;
+      let b = m.slice(this.PREFIX.length).replace(/-/g, '+').replace(/_/g, '/'); while (b.length % 4) b += '=';
+      return this._valid(JSON.parse(decodeURIComponent(escape(atob(b)))));
     } catch (e) { return null; }
   },
-  clear() { try { sessionStorage.removeItem(this.KEY); } catch (e) { /* abaikan */ } },
+  _valid(s) { return s && s.token && s.user && s.user.role ? s : null; },
+  save() {
+    const raw = this._payload();
+    try { sessionStorage.setItem(this.KEY, raw); } catch (e) { /* abaikan */ }
+    try { google.script.history.replace(null, null, this._encode(raw)); } catch (e) { /* tidak tersedia */ }
+  },
+  load() { try { return this._valid(JSON.parse(sessionStorage.getItem(this.KEY) || 'null')); } catch (e) { return null; } },
+  /** Baca sesi dari URL induk; callback dipanggil tepat sekali (null bila tidak ada). */
+  loadFromUrl(cb) {
+    let done = false; const fin = (v) => { if (!done) { done = true; cb(v); } };
+    try {
+      if (!(window.google && google.script && google.script.url && google.script.url.getLocation)) return fin(null);
+      setTimeout(() => fin(null), 2500);
+      google.script.url.getLocation((loc) => fin(this._decode(loc && loc.hash)));
+    } catch (e) { fin(null); }
+  },
+  clear() {
+    try { sessionStorage.removeItem(this.KEY); } catch (e) { /* abaikan */ }
+    try { google.script.history.replace(null, null, ''); } catch (e) { /* tidak tersedia */ }
+  },
 };
 
-/** Dipanggil saat halaman dibuka: pulihkan sesi (jika ada) atau tampilkan login. */
+/** Dipanggil saat halaman dibuka: pulihkan sesi (storage, lalu URL) atau tampilkan login. */
 function boot() {
+  const restore = (s) => {
+    if (!s || !Views[s.user.role]) return renderLogin();
+    App.token = s.token; App.user = s.user;
+    renderShell(s.nav);
+  };
   const s = SessionStore.load();
-  if (!s || !Views[s.user.role]) return renderLogin();
-  App.token = s.token; App.user = s.user;
-  renderShell(s.nav);
+  if (s) return restore(s);
+  SessionStore.loadFromUrl((u) => (u ? restore(u) : renderLogin()));
 }
 
 function renderLogin() {
@@ -48,19 +73,13 @@ function renderLogin() {
   h('label', { class: 'field' }, h('span', null, 'Username'), user),
   h('label', { class: 'field' }, h('span', null, 'Kata sandi'), pass),
   err, btn);
-  $('#app').replaceChildren(h('div', { class: 'login card' }, h('h1', null, 'ExamForm CBT'),
+  $('#app').replaceChildren(h('div', { class: 'login card' }, h('div', { class: 'logo big' }, 'E'), h('h1', null, 'ExamForm CBT'),
     h('p', { class: 'muted', style: 'text-align:center' }, 'Login Admin & Guru. Siswa memakai aplikasi Android.'), form));
 }
 
 /** Minta data layar pertama + layar daftar ujian (paling berat) paralel saat shell dirender. */
 function prefetchFirstScreens() {
-  if (App.user.role === 'admin') {
-    Prefetch.start('admin.guru.list');
-    Prefetch.start('ujian.list'); Prefetch.start('admin.penugasan.list');
-  } else {
-    Prefetch.start('guru.penugasan.list');
-    Prefetch.start('ujian.list');
-  }
+  Prefetch.start('dashboard.stats');
 }
 
 function logout(expired) {
@@ -69,26 +88,34 @@ function logout(expired) {
   if (expired) toast('Sesi berakhir, silakan login kembali.', 'error');
 }
 
+const NAV_ICON = { beranda: '⌂', guru: '☺', penugasan: '⇄', siswa: '☷', mapel: '✎', jenis: '☰', ujian: '✔', bank: '▤' };
+
 function renderShell(startId) {
   const views = Views[App.user.role];
   const content = h('main', { id: 'content' });
-  const nav = h('nav', null, views.map((v) => h('button', { 'data-id': v.id, onclick: () => go(v.id) }, v.label)));
+  const nav = h('nav', null, views.map((v) => h('button', { 'data-id': v.id, onclick: () => go(v.id) },
+    h('span', { class: 'ico', 'aria-hidden': 'true' }, v.icon || NAV_ICON[v.id] || '•'), h('span', null, v.label))));
   const go = (id) => {
     nav.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.getAttribute('data-id') === id));
     const view = views.find((x) => x.id === id);
     loading(content);
-    const box = h('div');
-    content.replaceChildren(h('div', { class: 'topbar' }, h('h2', null, view.label)), box);
+    const box = h('div', { class: 'view' });
+    content.replaceChildren(h('div', { class: 'topbar' }, h('h2', null, view.label),
+      h('span', { class: 'muted right date' }, new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))), box);
     App.nav = { id, go };
     SessionStore.save();
     view.render(box);
+    window.scrollTo(0, 0);
   };
+  const initials = App.user.nama.split(/\s+/).slice(0, 2).map((w) => w.charAt(0).toUpperCase()).join('');
   const aside = h('aside', null,
-    h('div', { class: 'brand' }, 'ExamForm ' + (App.user.role === 'admin' ? 'Admin' : 'Guru')),
+    h('div', { class: 'brand' }, h('span', { class: 'logo' }, 'E'), h('div', null, h('div', { class: 'name' }, 'ExamForm CBT'),
+      h('div', { class: 'role' }, App.user.role === 'admin' ? 'Administrator' : 'Guru'))),
     nav,
-    h('div', { style: 'margin-top:1rem;padding:.5rem' },
-      h('div', null, App.user.nama), h('div', { class: 'muted' }, App.user.username),
-      h('div', { class: 'row', style: 'margin-top:.5rem' },
+    h('div', { class: 'usercard' },
+      h('div', { class: 'row', style: 'flex-wrap:nowrap' }, h('span', { class: 'avatar' }, initials),
+        h('div', { style: 'min-width:0' }, h('div', { class: 'uname' }, App.user.nama), h('div', { class: 'muted small-text' }, App.user.username))),
+      h('div', { class: 'row', style: 'margin-top:.6rem' },
         h('button', { class: 'small', onclick: changePasswordDialog }, 'Ganti sandi'),
         h('button', { class: 'small', onclick: () => logout() }, 'Keluar'))));
   $('#app').replaceChildren(h('div', { class: 'layout' }, aside, content));

@@ -15,12 +15,18 @@ const fs = require('fs');
   const html = renderIndex();
   // Disajikan lewat http:// (bukan about:blank) agar sessionStorage berfungsi & refresh sungguhan bisa diuji.
   await page.route('http://examform.test/', (r) => r.fulfill({ contentType: 'text/html', body: html }));
+  let topHash = '';
+  await page.exposeFunction('__setHash', (v) => { topHash = v; });
+  await page.exposeFunction('__getHash', () => topHash);
   await page.addInitScript(() => {
     function mk() { return { _s: () => {}, _f: () => {},
       withSuccessHandler(cb) { const n = mk(); n._s = cb; n._f = this._f; return n; },
       withFailureHandler(cb) { const n = mk(); n._f = cb; n._s = this._s; return n; },
       apiRequest(t) { window.__apiRequest(t).then(this._s, (e) => this._f(e)); } }; }
-    window.google = { script: { run: mk() } };
+    // meniru hash URL induk Apps Script (bertahan saat reload walau sessionStorage hilang)
+    window.google = { script: { run: mk(),
+      history: { replace(st, pr, hash) { window.__setHash(hash || ''); } },
+      url: { getLocation(cb) { window.__getHash().then((hash) => cb({ hash })); } } } };
   });
   await page.goto('http://examform.test/');
   const steps = [];
@@ -32,13 +38,19 @@ const fs = require('fs');
   await page.fill('input[name=password]', setup.admin.password);
   await page.click('button[type=submit]');
   await page.waitForSelector('aside nav button');
-  ok('admin masuk & menu tampil', (await page.locator('aside nav button').count()) === 6);
+  ok('admin masuk & menu tampil', (await page.locator('aside nav button').count()) === 8 && (await page.locator('.tile').count()) >= 5);
+  await page.screenshot({ path: process.env.SHOT_DIR ? process.env.SHOT_DIR + '/admin-beranda.png' : '/tmp/admin-beranda.png' });
 
   // refresh halaman sungguhan -> sesi login dipulihkan (tidak kembali ke login)
   ok('sesi login tersimpan di sessionStorage', (await page.evaluate(() => sessionStorage.getItem('examform.session') || '')).includes('"token"'));
   await page.reload();
   await page.waitForSelector('aside nav button');
-  ok('setelah refresh tetap masuk (tidak ke halaman login)', (await page.locator('aside nav button').count()) === 6 && (await page.locator('select[name=role]').count()) === 0);
+  ok('setelah refresh tetap masuk (tidak ke halaman login)', (await page.locator('aside nav button').count()) === 8 && (await page.locator('select[name=role]').count()) === 0);
+
+  // sandbox iframe Apps Script: sessionStorage hilang saat reload -> sesi dipulihkan dari hash URL
+  await page.evaluate(() => sessionStorage.clear());
+  await page.reload(); await page.waitForSelector('aside nav button');
+  ok('refresh tanpa sessionStorage tetap masuk (via hash URL)', (await page.locator('select[name=role]').count()) === 0 && (await page.locator('aside nav button').count()) === 8);
 
   const nav = async (label) => { await page.click(`aside nav button:has-text("${label}")`); await page.waitForTimeout(150); };
   // mapel
@@ -47,7 +59,7 @@ const fs = require('fs');
   ok('tambah mapel', true);
   // guru
   await nav('Guru'); await page.click('text=+ Tambah guru');
-  await page.fill('input[name=nama]', 'Bu Sari'); await page.fill('input[name=username]', 'sari'); await page.click('.modal button.primary');
+  await page.fill('input[name=nama]', 'Bu Sari'); await page.fill('input[name=username]', 'sari'); await page.fill('input[name=email]', 'sari@sekolah.sch.id'); await page.click('.modal button.primary');
   await page.waitForSelector('.mono');
   const guruPw = (await page.locator('.modal .mono').first().textContent()).trim();
   ok('password guru ditampilkan', guruPw.length === 8);
@@ -68,7 +80,9 @@ const fs = require('fs');
   // guru
   await page.click('button:has-text("Keluar")');
   await page.selectOption('select[name=role]', 'guru'); await page.fill('input[name=username]', 'sari'); await page.fill('input[name=password]', guruPw);
-  await page.click('button[type=submit]'); await page.waitForSelector('td:has-text("Fisika")');
+  await page.click('button[type=submit]'); await page.waitForSelector('.tiles');
+  ok('guru masuk ke Beranda', (await page.locator('.tile').count()) >= 4 && (await page.locator('.tile:has-text("Siswa")').count()) === 0);
+  await nav('Mapel Saya'); await page.waitForSelector('td:has-text("Fisika")');
   ok('guru melihat mapel', true);
   await nav('Ujian, Soal & Form'); await page.click('text=+ Buat ujian');
   await page.fill('input[name=judul]', 'UH Gerak'); await page.fill('input[name=durasiMenit]', '40'); await page.click('.modal button.primary');
@@ -92,6 +106,8 @@ const fs = require('fs');
   await page.click('.modal button.primary:has-text("Simpan")');
   await page.waitForSelector('td:has-text("Jodohkan")');
   ok('soal menjodohkan tersimpan', (await page.locator('text=Massa → kg').count()) === 1);
+  await page.click('button:has-text("Simpan semua ke bank soal")'); await page.waitForSelector('.toast:has-text("disimpan ke bank soal")');
+  ok('simpan soal ke bank soal', true);
   await page.click('button:has-text("← Kembali")'); await page.waitForSelector('td:has-text("UH Gerak")');
   await page.click('td button:text-is("Peserta")'); await page.waitForSelector('td:has-text("Ani")');
   await page.click('text=Pilih yang tampil'); await page.click('button:has-text("Simpan peserta")');
@@ -107,6 +123,7 @@ const fs = require('fs');
   await page.click('.modal button:has-text("Tutup")');
   await page.waitForSelector('td .badge:has-text("Terpasang")');
   ok('status form "Terpasang"', true);
+  ok('link Edit Form + editor email guru tampil', (await page.locator('a:has-text("Edit Form")').count()) === 1 && (await page.locator('td:has-text("Editor: sari@sekolah.sch.id")').count()) === 1);
   await page.click('td button:text-is("Aktifkan")'); await page.waitForSelector('td button:text-is("Nonaktifkan")');
   ok('guru dapat mengaktifkan ujian sendiri', true);
   await page.screenshot({ path: process.env.SHOT_DIR ? process.env.SHOT_DIR + '/guru-ujian-form.png' : '/tmp/guru-ujian-form.png' });
@@ -119,6 +136,10 @@ const fs = require('fs');
   ok('admin melihat ujian guru + tombol Buat ujian', (await page.locator('text=+ Buat ujian').count()) === 1 && (await page.locator('td:has-text("Fisika")').count()) >= 1);
   await page.click('td button:text-is("Hasil")'); await page.waitForSelector('text=Sinkronkan hasil dari Google Form');
   ok('admin membuka hasil + tombol sinkron Google Form', true);
+  ok('filter kelas & jenjang pada hasil ujian', (await page.locator('select[aria-label="Filter jenjang"]').count()) === 1 && (await page.locator('select[aria-label="Filter kelas"]').count()) === 1 && (await page.locator('.stat-mini').count()) === 5);
+  await nav('Bank Soal'); await page.waitForSelector('td:has-text("Massa")');
+  ok('menu Bank Soal menampilkan soal tersimpan', (await page.locator('tbody tr').count()) >= 1);
+  await page.screenshot({ path: process.env.SHOT_DIR ? process.env.SHOT_DIR + '/admin-bank.png' : '/tmp/admin-bank.png' });
 
   ok('tidak ada error JS di konsol', errors.length === 0);
   if (errors.length) console.log(errors);
